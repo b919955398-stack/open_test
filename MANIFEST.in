@@ -1,0 +1,2 @@
+recursive-include src/hbess_open/appendices *.cls *.png
+include README.md LICENSE

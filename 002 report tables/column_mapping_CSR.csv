@@ -1,0 +1,12 @@
+﻿Sheet_To_Update,Deliverable,Category,Clause,Test No,Subtest No,Readable_Name,Test Details,File_Name,PSSE,PSCAD,Grid_SCR,Post_Fault_SCR,Grid_FL_MVA_sig,Grid_X2R_sig,Final_Grid_X2R_sig,Vpoc_pu_sig,Qpoc_pu,Qpoc_MVAr_sig,Vref_pu_sig,Ppoc_pu,Ppoc_MW_sig,PLR_MW_sig,Fault_Type,Fault_Type_sig,Fault_Time_sig,Fault_Duration_sig,Fault_Impedance,Fault_X2R_sig,Ures_sig,Zf2Zs_sig,Rf_Offset_sig,Xf_Offset_sig,Fault_Timing_Signal_sig,Post_Init_Duration_s,PSSE Commands,Vslack_pu_sig,Model_Relpath,U_Ov,Control Mode,PPM_Config_File_Number_gs,Reference,Plotter Table,Appendix_Name_PSCAD,Appendix_Letter_PSCAD,Appendix_Name_PSSE,Appendix_Letter_PSSE,Report
+5253_F,,,,,,Test No,Test Type,,,,,,,,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,,,,,,,,,,,,,,,,,,,,,,Appendix Reference,,Appendix Reference,,
+5254_Withstand,,,,,,Test No,Test Type,,,,,,,,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,,,,,,,,,,,,,,,,,,,,,,Appendix Reference,,Appendix Reference,,
+5255_balFaults,,,,,,Test No,,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,,Type,,,Duration [s],Impedance,,,,,,,,,,,,,,,,Appendix Reference ,,Appendix Reference ,,
+5255_UnbalFaults,,,,,,Test No,,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,,Type,,,Duration [s],Impedance,,,,,,,,,,,,,,,,Appendix Reference ,,Appendix Reference ,,
+5257_PLR,,,,,,Test No,,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,Load Rejection [MW],,,,,,,,,,,,,,,,,,,,,Appendix Reference,,Appendix Reference,,
+5255_TOV,,,,,,Test No,,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,,,,,Duration [s],,,,,,,,,,,,Uov [pu],,,,,Appendix Reference ,,Appendix Reference ,,
+52513_Vgrid_droop,,,,,,Test No,Test Type,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,,,,,,,,,,,,,,,,,,,,,,Appendix Reference ,,Appendix Reference ,,
+52513_Vref,,,,,,Test No,Test Type,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,,Ppoc [pu],,,,,,,,,,,,,,,,,,,,,,,Appendix Reference ,,Appendix Reference ,,
+52513_Qref,,,,,,Test No,Test Type,,,,SCR,,,X/R,,Vpoc [pu],,,Vref [pu],Ppoc [pu],,,,,,,,,,,,,,,,,,,,,,,Appendix Reference ,,Appendix Reference ,,
+52513_PFref,,,,,,Test No,Test Type,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,Vref [pu],Ppoc [pu],,,,,,,,,,,,,,,,,,,,,,,Appendix Reference ,,Appendix Reference ,,
+52514_Pref,,,,,,Test No,Test Type,,,,SCR,,,X/R,,Vpoc [pu],Qpoc [pu],,Vref [pu],,,,,,,,,,,,,,,,,,,,,,,,Appendix Reference ,,Appendix Reference ,,

@@ -1,0 +1,485 @@
+{
+    "bus_voltage_channels": [
+        {
+            "bus": 100111,
+            "vol_name": "V_HYBESS_PU",
+            "ang_name": "HYBESS_V_ANG"
+        },
+        {
+            "bus": 300111,
+            "vol_name": "V_HYBESS_PU3",
+            "ang_name": "HYBESS_V_ANG3"
+        },
+        {
+            "bus": 100100,
+            "vol_name": "V_POC_PU",
+            "ang_name": "HYBESS_V_POC_ANG"
+        },
+        {
+            "bus": 300101,
+            "vol_name": "V_MV_PU",
+            "ang_name": "V_MV_ANG"
+        }    
+    ],
+    "branch_pq_channels": [
+        {
+            "branch": {
+                "from_bus": 100011,
+                "to_bus": 111111,
+                "circuit_id": "1"
+            },
+            "p_name": "POI_P",
+            "q_name": "POI_Q"
+        },
+        {
+            "branch": {
+                "from_bus": 111111,
+                "to_bus": 100100,
+                "circuit_id": "1"
+            },
+            "p_name": "PPOC_MW",
+            "q_name": "QPOC_MVAR"
+        },   
+        {
+            "branch": {
+                "from_bus": 100110,
+                "to_bus": 100102,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE1_PFROM",
+            "q_name": "BESS_CABLE1_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 200110,
+                "to_bus": 200102,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE2_PFROM",
+            "q_name": "BESS_CABLE2_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 300110,
+                "to_bus": 300102,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE3_PFROM",
+            "q_name": "BESS_CABLE3_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 400110,
+                "to_bus": 400102,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE4_PFROM",
+            "q_name": "BESS_CABLE4_QFROM"
+        }, 
+        {
+            "branch": {
+                "from_bus": 100102,
+                "to_bus": 100110,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE1_PBACK",
+            "q_name": "BESS_CABLE1_QBACK"
+        },
+        {
+            "branch": {
+                "from_bus": 200102,
+                "to_bus": 200110,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE2_PBACK",
+            "q_name": "BESS_CABLE2_QBACK"
+        },
+        {
+            "branch": {
+                "from_bus": 300102,
+                "to_bus": 300110,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE3_PBACK",
+            "q_name": "BESS_CABLE3_QBACK"
+        },
+        {
+            "branch": {
+                "from_bus": 400102,
+                "to_bus": 400110,
+                "circuit_id": "1"
+            },
+            "p_name": "BESS_CABLE4_PBACK",
+            "q_name": "BESS_CABLE4_QBACK"
+        },     
+        {
+            "branch": {
+                "from_bus": 100102,
+                "to_bus": 100101,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE1_PFROM",
+            "q_name": "33KV_CABLE1_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 200102,
+                "to_bus": 200101,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE2_PFROM",
+            "q_name": "33KV_CABLE2_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 300102,
+                "to_bus": 300101,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE3_PFROM",
+            "q_name": "33KV_CABLE3_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 400102,
+                "to_bus": 400101,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE4_PFROM",
+            "q_name": "33KV_CABLE4_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 100101,
+                "to_bus": 100102,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE1_PBACK",
+            "q_name": "33KV_CABLE1_QBACK"
+        },
+        {
+            "branch": {
+                "from_bus": 200101,
+                "to_bus": 200102,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE2_PBACK",
+            "q_name": "33KV_CABLE2_QBACK"
+        },
+        {
+            "branch": {
+                "from_bus": 300101,
+                "to_bus": 300102,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE3_PBACK",
+            "q_name": "33KV_CABLE3_QBACK"
+        },
+        {
+            "branch": {
+                "from_bus": 400101,
+                "to_bus": 400102,
+                "circuit_id": "1"
+            },
+            "p_name": "33KV_CABLE4_PBACK",
+            "q_name": "33KV_CABLE4_QBACK"
+        },
+        {
+            "branch": {
+                "from_bus": 100011,
+                "to_bus": 111111,
+                "circuit_id": "1"
+            },
+            "p_name": "HV_CABLE_PFROM",
+            "q_name": "HV_CABLE_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 111111,
+                "to_bus": 100011,
+                "circuit_id": "1"
+            },
+            "p_name": "HV_CABLE_PBACK",
+            "q_name": "HV_CABLE_QBACK"
+        },    
+        {
+            "branch": {
+                "from_bus": 100111,
+                "to_bus": 100110,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX1_PFROM",
+            "q_name": "INVERTER_TX1_QFROM"
+        },       
+        {
+            "branch": {
+                "from_bus": 200111,
+                "to_bus": 200110,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX2_PFROM",
+            "q_name": "INVERTER_TX2_QFROM"
+        }, 
+        {
+            "branch": {
+                "from_bus": 300111,
+                "to_bus": 300110,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX3_PFROM",
+            "q_name": "INVERTER_TX3_QFROM"
+        }, 
+        {
+            "branch": {
+                "from_bus": 400111,
+                "to_bus": 400110,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX4_PFROM",
+            "q_name": "INVERTER_TX4_QFROM"
+        },
+        {
+            "branch": {
+                "from_bus": 100110,
+                "to_bus": 100111,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX1_PBACK",
+            "q_name": "INVERTER_TX1_QBACK"
+        },       
+        {
+            "branch": {
+                "from_bus": 200110,
+                "to_bus": 200111,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX2_PBACK",
+            "q_name": "INVERTER_TX2_QBACK"
+        }, 
+        {
+            "branch": {
+                "from_bus": 300110,
+                "to_bus": 300111,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX3_PBACK",
+            "q_name": "INVERTER_TX3_QBACK"
+        }, 
+        {
+            "branch": {
+                "from_bus": 400110,
+                "to_bus": 400111,
+                "circuit_id": "1"
+            },
+            "p_name": "INVERTER_TX4_PBACK",
+            "q_name": "INVERTER_TX4_QBACK"
+        }     
+    ],
+    "var_channels": [
+         {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 8,    
+            "signal_name": "PREF_MW"
+        },
+          {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 0,    
+            "signal_name": "PPOC_REF_MW"
+        },
+          {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 6,    
+            "signal_name": "V_INV_REF_PU"
+        },
+          {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 18,    
+            "signal_name": "V_POC_REF_PU"
+        },
+        {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 6,    
+            "signal_name": "V_POC_REF_PU_2"
+        },
+        {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 52,    
+            "signal_name": "V_POC_REF_PU_3"
+        },
+        {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 18,    
+            "signal_name": "V_POC_REF_PU_4"
+        },
+          {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 1,    
+            "signal_name": "QPOC_REF_MVAR"
+        },
+          {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 9,    
+            "signal_name": "QINV_REF_MVAR"
+        },
+          {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 21,    
+            "signal_name": "HVRT_FLAG"
+        },    
+          {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 33,    
+            "signal_name": "LVRT_FLAG"
+        },
+        {
+        "model": {
+                "bus": 100111,
+                "model_type": "PLANT",
+                "slot": "GEN",
+                "registered_name": "smagf308",
+                "machine_id": "1"
+            },
+            "index": 202,    
+            "signal_name": "QINV_OUT"
+        },
+        {
+        "model": {
+                "bus": 100111,
+                "model_type": "PLANT",
+                "slot": "GEN",
+                "registered_name": "smagf308",
+                "machine_id": "1"
+            },
+            "index": 191,    
+            "signal_name": "QINV_OUT_2"
+        },
+        {
+            "model": {
+                "bus": 100100,
+                "model_type": "OTHER_BUS",
+                "registered_name": "FLNPPC_V1020"
+            },
+            "index": 44,    
+            "signal_name": "PPC_FRZ"
+        }
+    ],
+    "machine_channels": [
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 100111
+            },
+            "machine_quantity":"PELEC",
+            "signal_name": "PMEAS_INV_PU"
+        },
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 200111
+            },
+            "machine_quantity":"PELEC",
+            "signal_name": "PMEAS_INV2_PU"
+        },
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 300111
+            },
+            "machine_quantity":"PELEC",
+            "signal_name": "PMEAS_INV3_PU"
+        },
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 400111
+            },
+            "machine_quantity":"PELEC",
+            "signal_name": "PMEAS_INV4_PU"
+        },
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 100111
+            },
+            "machine_quantity":"QELEC",
+            "signal_name": "QMEAS_INV_PU"
+        },
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 200111
+            },
+            "machine_quantity":"QELEC",
+            "signal_name": "QMEAS_INV2_PU"
+        },
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 300111
+            },
+            "machine_quantity":"QELEC",
+            "signal_name": "QMEAS_INV3_PU"
+        },
+        {
+            "machine": {
+                "mach_id": "1",
+                "bus": 400111
+            },
+            "machine_quantity":"QELEC",
+            "signal_name": "QMEAS_INV4_PU"
+        }
+    ],
+    "state_channels": [],
+    "freq_channels": [
+        {
+            "bus": {
+                "num": 100100
+            },
+            "signal_name": "POC_F_PU"
+        }
+    ]
+}

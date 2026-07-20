@@ -1,0 +1,189 @@
+{
+    "playback_machine": {
+        "bus": 100000,
+        "mach_id": "1"
+    },
+    "buses": [
+        {
+            "name": "GRID_132",
+            "num": 100000
+        },    
+        {
+            "name": "DUMMY",
+            "num": 111111
+        },	
+        {
+            "name": "888888",
+            "num": 888888
+        },	
+        {
+            "name": "POC",
+            "num": 100100
+        },
+        {
+           "name": "POI",
+            "num": 100011
+        },  
+        {
+           "name": "LV TX",
+            "num": 100101
+        }, 
+        {
+           "name": "INV1 MV",
+            "num": 100110
+        },
+        {
+           "name": "INV1 LV",
+            "num": 100111
+        },
+        {
+            "name": "INV2 MV",
+            "num": 200110
+        },
+        {
+           "name": "INV2 LV",
+            "num": 200111
+        },
+        {
+            "name": "INV3 MV",
+            "num": 300110
+        },
+        {
+           "name": "INV3 LV",
+            "num": 300111
+        },
+        {
+            "name": "INV4 MV",
+            "num": 400110
+        },
+        {
+           "name": "INV4 LV",
+            "num": 400111
+        },
+        {
+            "name": "INV1 SW",
+            "num": 100102
+        },
+        {
+           "name": "INV2 SW",
+            "num": 200102
+        },
+        {
+            "name": "INV3 SW",
+            "num": 300102
+        },
+        {
+           "name": "INV4 SW",
+            "num": 400102
+        }     
+    ],
+    "branches": [
+        {
+            "name": "grid",
+            "from_bus": 100000,
+            "to_bus": 100100,
+            "circuit_id": "1"
+        },
+        {
+            "name": "meter",
+            "from_bus": 100100,
+            "to_bus": 100000,
+            "circuit_id": "1"
+        }
+    ],
+    "machines": [
+        {
+            "name": "slack",
+            "bus": 100000,
+            "mach_id": "1"
+        },
+        {
+            "name": "haywood_inv1",
+            "bus": 100111,
+            "mach_id": "1"
+        },
+        {
+            "name": "haywood_inv2",
+            "bus": 200111,
+            "mach_id": "1"
+        },
+        {
+            "name": "haywood_inv3",
+            "bus": 300111,
+            "mach_id": "1"
+        },
+        {
+            "name": "haywood_inv4",
+            "bus": 400111,
+            "mach_id": "1"
+        }
+    ],
+    "fixed_shunts": [
+        {   
+            "bus": 888888,
+            "id": "1",
+            "name": "tov"
+        }     
+    ],
+    "loads": [
+                {
+            "bus": 111111,
+            "id": "1",
+            "name": "PLR"
+        }
+    ],
+    "two_windings": [
+        {
+            "name": "inv1 tx",
+            "from_bus": 100110,
+            "to_bus": 100111,
+            "id": "1"
+        },
+        {
+            "name": "phase_shift_tx",
+            "from_bus": 100100,
+            "to_bus": 111111,
+            "id": "2"
+        },    
+        {
+            "name": "inv2 tx",
+            "from_bus": 200110,
+            "to_bus": 200111,
+            "id": "1"
+        },
+        {
+            "name": "inv3 tx",
+            "from_bus": 300110,
+            "to_bus": 300111,
+            "id": "1"
+        },
+        {
+            "name": "inv4 tx",
+            "from_bus": 400110,
+            "to_bus": 400111,
+            "id": "1"
+        }
+    ],
+    "models": [
+        {
+            "name": "gen_cls",
+            "bus": 100000,
+            "machine_id": "1",
+            "slot": "GEN",
+            "model_type": "PLANT"
+        },
+        {
+            "name": "smagf308",
+            "bus": 100111,
+            "machine_id": "1",
+            "slot": "GEN",
+            "model_type": "PLANT"
+        },
+        {
+            "name": "flncppc",
+            "bus": 100100,
+            "model_type": "OTHER_BUS",
+            "registered_name": "FLNPPC_V1020"
+        }
+    ]
+}

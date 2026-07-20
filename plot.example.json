@@ -1,0 +1,11 @@
+{
+  "time_column": "time",
+  "columns": 2,
+  "dpi": 160,
+  "panels": [
+    {"title": "POC Voltage", "signals": ["POC_VOLTAGE"], "ylabel": "pu"},
+    {"title": "POC Active Power", "signals": ["POC_P"], "ylabel": "MW"},
+    {"title": "POC Reactive Power", "signals": ["POC_Q"], "ylabel": "MVAr"},
+    {"title": "Frequency", "signals": ["POC_FREQUENCY", "GRID_FREQUENCY"], "ylabel": "Hz"}
+  ]
+}

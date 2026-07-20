@@ -1,0 +1,138 @@
+{
+    "grid_impedance_setter": {
+        "grid_branch_name": "grid",
+        "fault_level_mva_column_name": "Grid_FL_MVA_sig",
+        "x2r_column_name": "Grid_X2R_sig"
+    },
+    "is_smib": true,
+    "grid_branch_name": "grid",
+    "non_iterative_p_controllers": null,
+    "vpoc_controller": {
+        "poc_bus": {
+            "name": "POC"
+        },
+        "vpoc_pu_column_name": "Vpoc_pu_sig",
+        "enrolled_machines": [
+            {
+                "name": "haywood_inv1"
+            },
+            {
+                "name": "haywood_inv2"
+            },
+            {
+                "name": "haywood_inv3"
+            },
+            {
+                "name": "haywood_inv4"
+            } 
+        ]  
+      },
+    "vbus_via_vsched_controllers": null,
+    "qbranch_via_vsched_controllers": [{
+        "enrolled_machines": 
+        [
+            {
+                "name": "slack",
+                "regulated_bus": 100000
+            }
+        ],
+        "target_columns": [
+            {
+                "column_name": "Qpoc_MVAr_init",
+                "scaling": 1.0
+            }
+        ],
+        "measurement_branches": [
+            {
+                "name": "meter",
+                "scaling": 1.0
+            }
+        ],
+        "initial_step_size_v": 0.001,
+        "convergence_tolerance_mvar": 0.1,
+        "max_iterations": 400,
+        "verbose": false
+    }],
+    "iterative_p_controllers": [
+        {
+             "name": "Inv controller",           
+            "machines": [
+                {
+                    "name": "haywood_inv1",
+                    "pmax_mw": 105.8,
+                    "pmin_mw": -105.8,
+                    "scaling": 0.25
+                },
+                {
+                    "name": "haywood_inv2",
+                    "pmax_mw": 105.8,
+                    "pmin_mw": -105.8,
+                    "scaling": 0.25
+                },
+                {
+                    "name": "haywood_inv3",
+                    "pmax_mw": 105.8,
+                    "pmin_mw": -105.8,
+                    "scaling": 0.25
+                },
+                {
+                    "name": "haywood_inv4",
+                    "pmax_mw": 105.8,
+                    "pmin_mw": -105.8,
+                    "scaling": 0.25
+                }
+            ],
+            "target_columns": [
+                {
+                    "column_name": "Ppoc_MW_sig",
+                    "scaling": 1.0
+                }
+            ],
+            "measurement_branches": [
+                {
+                    "name": "meter",
+                    "scaling": 1.0
+                }
+            ],
+            "initial_step_size_mw": 1,
+            "convergence_tolerance_mw": 0.1,
+            "max_iterations": 40,
+            "max_steps_into_saturation": 10,
+            "acceleration_factor": 1.05,
+            "verbose": false
+        }
+    ],
+    "restrictive_droop_controllers": null,
+    "var_rebalancer": {
+        "enrolled_machines": 
+            [
+                {
+                    "name": "haywood_inv1",
+                    "weighting": 0.25,
+                    "qmin_mvar": -105.8,
+                    "qmax_mvar": 105.8
+                },
+                {
+                    "name": "haywood_inv2",
+                    "weighting": 0.25,
+                    "qmin_mvar": -105.8,
+                    "qmax_mvar": 105.8
+                },
+                {
+                    "name": "haywood_inv3",
+                    "weighting": 0.25,
+                    "qmin_mvar": -105.8,
+                    "qmax_mvar": 105.8
+                },
+                {
+                    "name": "haywood_inv4",
+                    "weighting": 0.25,
+                    "qmin_mvar": -105.8,
+                    "qmax_mvar": 105.8
+                }
+            ],
+        "q_limit_tolerance_mvar": 0.2
+    },
+    "max_initialiser_iterations": 400,
+    "vdroop_branch_via_vsched_controllers": null
+}

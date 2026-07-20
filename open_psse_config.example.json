@@ -1,0 +1,29 @@
+{
+  "_notes": [
+    "This file is optional when MODEL_DIR contains exactly one SAV, DYR, savdef, initdef and chandef.",
+    "Copy it to MODEL_DIR as open_psse_config.json only to select among multiple files or override a default."
+  ],
+  "psse": {
+    "version": 34,
+    "python_path": "C:\\Program Files (x86)\\PTI\\PSSE34\\PSSPY39",
+    "bin_path": "C:\\Program Files (x86)\\PTI\\PSSE34\\PSSBIN",
+    "max_buses": 200000
+  },
+  "files": {
+    "sav": "SMAGF308_GFM_FLNPPC_CM9_2_2.sav",
+    "dyr": "SMAGF308_GFM_FLNPPC_CM9_2_2.dyr",
+    "copy_globs": ["*.dll", "*.txt", "*.cfg", "*.plb"]
+  },
+  "definition_files": {
+    "savdef": "HBESS.savdef",
+    "initdef": "HBESS.initdef",
+    "chandef": "HBESS.chandef"
+  },
+  "bases": {
+    "p_mw": 285.0,
+    "q_mvar": 112.575,
+    "s_mva": 306.42801866833264,
+    "normal_v_pu": 1.06
+  },
+  "continue_on_error": true
+}
