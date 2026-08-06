@@ -14,7 +14,16 @@ class Scenario:
 
     def get(self, name: str, default: Any = None) -> Any:
         value = self.values.get(name, default)
-        return default if value is None or value == "" else value
+        if value is None or (isinstance(value, str) and value == ""):
+            return default
+        if type(value).__name__ in {"NAType", "NaTType"}:
+            return default
+        try:
+            if bool(value != value):
+                return default
+        except Exception:
+            pass
+        return value
 
     @property
     def category(self) -> str:

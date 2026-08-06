@@ -5,7 +5,7 @@ import numpy as np
 from typing import List, Callable, Optional
 from hbess_open.utils.progress import tqdm
 
-from hbess_open.io.psse_out import out_to_df
+from hbess_open.io.result_data import companion_path, initialisation_seconds, result_to_df
 from hbess_open.io.signal_dsl import ParsedDslSignal
 
 
@@ -59,10 +59,6 @@ def p_reduction_table(
         Discharge_Cases_only:Optional[bool]=None,
         x86 : bool = True,
     ):
-    if not x86:
-        raise NotImplementedError("This native package contains the PSS/E analysis path only")
-    extension = ".out"
-
     results_df = pd.DataFrame(columns=[
             "Name",
             # "Lower Freq Band Time (s)": round(t_lower_limit,2),
@@ -82,7 +78,7 @@ def p_reduction_table(
     # for i in tqdm(range(len(psout_paths)), desc="Active Power Reduction Analysis"):
     for i in range(len(psout_paths)):
         psout_path = psout_paths[i]
-        json_path = psout_path.split(extension)[0] + ".json" 
+        json_path = companion_path(psout_path, ".json")
 
         with open(json_path, 'r') as f:
             spec = json.load(f)
@@ -109,7 +105,7 @@ def p_reduction_table(
    
 
         filename = simulation_name
-        df = out_to_df(psout_path)
+        df = result_to_df(psout_path)
 
         if df_manipulation_fn is not None:
             df = df_manipulation_fn(df)
@@ -117,7 +113,7 @@ def p_reduction_table(
         df_copy = df
 
         if not x86:
-            init_time_sec = float(spec["substitutions"]["TIME_Full_Init_Time_sec"])
+            init_time_sec = initialisation_seconds(spec)
             df_copy = df_copy[df_copy.index > init_time_sec]
             df_copy.index = df_copy.index - init_time_sec
 

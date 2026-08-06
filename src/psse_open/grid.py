@@ -3,31 +3,55 @@ from __future__ import annotations
 import math
 from typing import Tuple
 
+from hbess_open.initialisation.grid_equivalent import (
+    impedance_from_fault_level as _impedance_from_fault_level,
+    infinite_bus_voltage as _infinite_bus_voltage,
+)
 
-def impedance_from_fault_level(fault_level_mva: float, x_over_r: float, psse_base_mva: float = 100.0) -> Tuple[float, float]:
+
+def impedance_from_fault_level(
+    fault_level_mva: float,
+    x_over_r: float,
+    psse_base_mva: float = 100.0,
+) -> Tuple[float, float]:
     """Return Thevenin R/X in pu on the PSS/E system base."""
-    fault_level_mva = float(fault_level_mva)
-    x_over_r = float(x_over_r)
-    if fault_level_mva <= 0:
-        raise ValueError("fault_level_mva must be positive")
-    if x_over_r < 0:
-        raise ValueError("x_over_r cannot be negative")
-    z_pu = float(psse_base_mva) / fault_level_mva
-    r_pu = z_pu / math.sqrt(1.0 + x_over_r * x_over_r)
-    return r_pu, r_pu * x_over_r
+    return _impedance_from_fault_level(
+        fault_level_mva,
+        x_over_r,
+        psse_base_mva,
+    )
 
 
-def impedance_from_scr(scr: float, plant_base_mva: float, x_over_r: float, psse_base_mva: float = 100.0) -> Tuple[float, float]:
-    return impedance_from_fault_level(float(scr) * float(plant_base_mva), x_over_r, psse_base_mva)
+def impedance_from_scr(
+    scr: float,
+    plant_base_mva: float,
+    x_over_r: float,
+    psse_base_mva: float = 100.0,
+) -> Tuple[float, float]:
+    return impedance_from_fault_level(
+        float(scr) * float(plant_base_mva),
+        x_over_r,
+        psse_base_mva,
+    )
 
 
-def infinite_bus_voltage(v_poc_pu: float, p_mw: float, q_mvar: float, r_pu: float, x_pu: float, psse_base_mva: float = 100.0) -> float:
-    """Back-calculate infinite bus voltage using the convention in the open DMAT script."""
-    v_poc_pu = float(v_poc_pu)
-    if v_poc_pu == 0:
-        raise ValueError("v_poc_pu cannot be zero")
-    s_conjugate_pu = complex(float(p_mw), -float(q_mvar)) / float(psse_base_mva)
-    return abs(v_poc_pu - s_conjugate_pu * complex(float(r_pu), float(x_pu)) / v_poc_pu)
+def infinite_bus_voltage(
+    v_poc_pu: float,
+    p_mw: float,
+    q_mvar: float,
+    r_pu: float,
+    x_pu: float,
+    psse_base_mva: float = 100.0,
+) -> float:
+    """Back-calculate infinite-bus voltage using the open DMAT convention."""
+    return _infinite_bus_voltage(
+        v_poc_pu,
+        p_mw,
+        q_mvar,
+        r_pu,
+        x_pu,
+        psse_base_mva,
+    )
 
 
 def fault_impedance_ohm(

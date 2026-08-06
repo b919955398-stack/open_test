@@ -5,7 +5,8 @@ import pandas as pd
 from typing import List, Tuple, Callable, Optional
 from hbess_open.utils.progress import tqdm
 from hbess_open.analysis.gridlink.characteristic_overlays import make_characteristic_overlay
-from hbess_open.io.psse_out import PsseOut as Out
+from hbess_open.analysis.clause_analysis.common import ensure_parent
+from hbess_open.io.result_data import SimulationOut as Out, companion_path, initialisation_seconds
 from hbess_open.io.signal_dsl import ParsedDslSignal
 
 
@@ -26,14 +27,11 @@ def produce_s52511_dpdf_outputs(
         x86 : bool = True
         ):
 
-    if not x86:
-        raise NotImplementedError("This native package contains the PSS/E analysis path only")
-    extension = ".out"
-
-    results_df = pd.DataFrame(columns=["Name", "Step No.", "Δf", "ΔP", "Saturated"])
+    result_columns = ["Name", "Step No.", "Δf", "ΔP", "Saturated"]
+    rows = []
     for i in tqdm(range(len(psout_paths)), desc="dP/df studies"):
         psout_path = psout_paths[i]
-        json_path = psout_path.split(extension)[0] + ".json"
+        json_path = companion_path(psout_path, ".json")
 
         with open(json_path, 'r') as f:
             spec = json.load(f)
@@ -52,7 +50,7 @@ def produce_s52511_dpdf_outputs(
 
         df_copy = df
         if not x86:
-            init_time_sec = float(spec["substitutions"][init_time_spec_key])
+            init_time_sec = initialisation_seconds(spec, init_time_spec_key)
             df_copy = df_copy[df_copy.index > init_time_sec]
             df_copy.index = df_copy.index - init_time_sec
         df = df_copy
@@ -82,8 +80,11 @@ def produce_s52511_dpdf_outputs(
                     "Saturated": p_saturated,
                 }
 
-            results_df = pd.concat([results_df, pd.DataFrame([new_row])], ignore_index=True)
+            rows.append(new_row)
 
+    results_df = pd.DataFrame(rows, columns=result_columns)
+    ensure_parent(output_csv_path)
+    ensure_parent(output_png_path)
     results_df.to_csv(output_csv_path, index=False)
 
     make_characteristic_overlay(
@@ -101,3 +102,4 @@ def produce_s52511_dpdf_outputs(
         saturated_points_additional_args={"marker": 'o'},
         characteristic_additional_args={"linestyle": '--'},
         )    
+    return results_df

@@ -203,8 +203,48 @@ PLOT_RESULTS = True              # plotted immediately after each completed case
 KEEP_CSV_RESULTS = False         # temporary CSV is removed after a successful plot
 SAVE_RUN_MANIFESTS = False       # running_spec.csv and study_plan.json
 KEEP_RUNTIME_FILES = False       # one shared temporary runtime, not _work/<case>
-KEEP_PSSE_LOGS = False           # progress/alert logs are normally unnecessary
+KEEP_PSSE_LOGS = False           # legacy fallback when PSSE_OUTPUT_MODE is None
+PSSE_OUTPUT_MODE = "console"     # console | files | quiet
 VERBOSE_RUN_STATUS = True
+
+# Dispatch every unique initial P/Q/V/grid condition once, save a solved SAV,
+# then reuse it for all matching dynamic scenarios. The cache is fingerprinted
+# against the source SAV, definitions, config and project hooks.
+USE_DISPATCH_CACHE = True
+REBUILD_DISPATCH_CACHE = False
+VERIFY_DISPATCH_CACHE_HASHES = False
+DISPATCH_CACHE_DIR = os.path.join(RESULTS_ROOT, "_dispatch_cache", SAV_VERSION)
+
+# Add project-specific columns here when before_dispatch/after_dispatch uses
+# them (for example inverter count, temperature, tap ratio or control mode).
+# Likely inverter-count/temperature/tap/control-mode columns are also detected
+# automatically when present in the selected SPEC.
+DISPATCH_KEY_COLUMNS = []
+AUTO_DISPATCH_KEY_COLUMNS = True
+
+# quiet | cases | commands. "commands" shows SPEC, SAV loading, dynamic time
+# advances and every compiled fault/model/TOV command. Use ["*"] below to
+# print every populated SPEC field instead of this concise review list.
+RUN_PROGRESS_LEVEL = "commands"
+PRINT_CASE_SPEC = True
+SPEC_FIELDS_TO_PRINT = [
+    "Spec_Source",
+    "Sheet_Name",
+    "Spec_Row",
+    "Category",
+    "Test No",
+    "Subtest No",
+    "File_Name",
+    "Ppoc_MW_sig",
+    "Qpoc_MVAr_init",
+    "Vpoc_pu_sig",
+    "Grid_SCR",
+    "Grid_FL_MVA_sig",
+    "Grid_X2R_sig",
+    "Is_Infinite",
+    "Post_Init_Duration_s",
+    "Steps_per_write",
+]
 
 
 def build_study_spec():
@@ -334,6 +374,16 @@ if __name__ == "__main__":
             save_run_manifests=SAVE_RUN_MANIFESTS,
             keep_runtime_files=KEEP_RUNTIME_FILES,
             keep_psse_logs=KEEP_PSSE_LOGS,
+            psse_output_mode=PSSE_OUTPUT_MODE,
+            use_dispatch_cache=USE_DISPATCH_CACHE,
+            dispatch_cache_dir=DISPATCH_CACHE_DIR,
+            rebuild_dispatch_cache=REBUILD_DISPATCH_CACHE,
+            dispatch_key_columns=DISPATCH_KEY_COLUMNS,
+            auto_dispatch_key_columns=AUTO_DISPATCH_KEY_COLUMNS,
+            verify_dispatch_cache_hashes=VERIFY_DISPATCH_CACHE_HASHES,
+            progress_level=RUN_PROGRESS_LEVEL,
+            print_case_spec=PRINT_CASE_SPEC,
+            spec_fields_to_print=SPEC_FIELDS_TO_PRINT,
             verbose=VERBOSE_RUN_STATUS,
         )
 

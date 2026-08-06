@@ -14,11 +14,31 @@ from psse_open.engine import StudyEngine, write_plan
 from psse_open.grid import impedance_from_fault_level, infinite_bus_voltage
 from psse_open.models import Scenario
 from psse_open.profiles import parse_signal_profile
+from psse_open.progress import ConsoleReporter
 
 
 INF_INIT_GRID_SCR = 3.68
 INF_INIT_GRID_X2R = 5.0
 INF_INIT_GRID_FL = 920.0
+
+DEFAULT_SPEC_FIELDS_TO_PRINT = [
+    "Spec_Source",
+    "Sheet_Name",
+    "Spec_Row",
+    "Category",
+    "Test No",
+    "Subtest No",
+    "File_Name",
+    "Ppoc_MW_sig",
+    "Qpoc_MVAr_init",
+    "Vpoc_pu_sig",
+    "Grid_SCR",
+    "Grid_FL_MVA_sig",
+    "Grid_X2R_sig",
+    "Is_Infinite",
+    "Post_Init_Duration_s",
+    "Steps_per_write",
+]
 
 
 def _initial_numeric(value: Any, default: float = 0.0) -> float:
@@ -72,7 +92,13 @@ def get_vslacks(specification: pd.DataFrame, MODEL_DIR: str, slack_bus_num: int)
 
 
 def _scenario_from_row(index: Any, row: pd.Series) -> Scenario:
-    values = {key: (None if isinstance(value, float) and pd.isna(value) else value) for key, value in row.to_dict().items()}
+    values = {}
+    for key, value in row.to_dict().items():
+        try:
+            missing = bool(pd.isna(value))
+        except (TypeError, ValueError):
+            missing = False
+        values[key] = None if missing else value
     return Scenario(
         sheet=str(values.get("Sheet_Name") or values.get("Category") or "SPEC"),
         row_number=int(index) + 2 if isinstance(index, int) else 0,
@@ -92,7 +118,17 @@ def run_psse_studies(
     save_run_manifests: bool = False,
     keep_runtime_files: bool = False,
     keep_psse_logs: bool = False,
+    psse_output_mode: str = None,
     verbose: bool = True,
+    use_dispatch_cache: bool = True,
+    dispatch_cache_dir: str = None,
+    rebuild_dispatch_cache: bool = False,
+    dispatch_key_columns: List[str] = None,
+    auto_dispatch_key_columns: bool = True,
+    verify_dispatch_cache_hashes: bool = False,
+    progress_level: str = "commands",
+    print_case_spec: bool = True,
+    spec_fields_to_print: List[str] = None,
 ):
     """Run and immediately plot each completed PSS/E scenario.
 
@@ -115,6 +151,42 @@ def run_psse_studies(
     config.data["result_layout"] = "pallet"
     config.data["keep_runtime_files"] = bool(keep_runtime_files)
     config.data["keep_psse_logs"] = bool(keep_psse_logs)
+    if psse_output_mode in (None, ""):
+        effective_psse_output_mode = "files" if keep_psse_logs else "quiet"
+    else:
+        effective_psse_output_mode = str(psse_output_mode).strip().lower()
+    if effective_psse_output_mode not in {"console", "files", "quiet"}:
+        raise ValueError(
+            "psse_output_mode must be console, files or quiet; got {!r}".format(psse_output_mode)
+        )
+    config.data["psse_output_mode"] = effective_psse_output_mode
+    resolved_cache_dir = Path(dispatch_cache_dir).resolve() if dispatch_cache_dir else (
+        Path(RESULTS_DIR).resolve().parent / "_dispatch_cache"
+    )
+    config.data["dispatch_cache"] = {
+        "enabled": bool(use_dispatch_cache),
+        "directory": str(resolved_cache_dir),
+        "rebuild": bool(rebuild_dispatch_cache),
+        "key_columns": list(dispatch_key_columns or []),
+        "automatic_key_columns": bool(auto_dispatch_key_columns),
+        "verify_hashes": bool(verify_dispatch_cache_hashes),
+    }
+    effective_progress_level = str(progress_level) if verbose else "quiet"
+    reporter = ConsoleReporter(
+        level=effective_progress_level,
+        print_case_spec=bool(print_case_spec),
+        spec_fields=(
+            DEFAULT_SPEC_FIELDS_TO_PRINT
+            if spec_fields_to_print is None
+            else list(spec_fields_to_print)
+        ),
+    )
+    config.data["progress"] = {
+        "level": effective_progress_level,
+        "print_case_spec": bool(print_case_spec),
+        "spec_fields": reporter.spec_fields,
+    }
+    config.reporter = reporter
     config.data.setdefault("dynamics", {}).update({
         "iterations": 1000,
         "acceleration": 0.1,
@@ -126,6 +198,31 @@ def run_psse_studies(
     scenarios = [_scenario_from_row(index, row) for index, row in specification.iterrows()]
     plans = [build_plan(scenario) for scenario in scenarios]
     Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+    category_source = (
+        specification["Category"]
+        if "Category" in specification.columns
+        else specification.get("Sheet_Name", pd.Series(["SPEC"] * len(specification)))
+    )
+    category_counts = category_source.fillna("(blank)").astype(str).value_counts().to_dict()
+    reporter.emit(
+        "SPEC selected: {} scenarios | categories={}".format(
+            len(specification), json.dumps(category_counts, sort_keys=True)
+        ),
+        "heading",
+        "cases",
+    )
+    reporter.emit(
+        "Dispatch cache: {} | rebuild={}".format(
+            str(resolved_cache_dir), bool(rebuild_dispatch_cache)
+        ),
+        "dispatch",
+        "cases",
+    )
+    reporter.emit(
+        "Native PSS/E output: {}".format(effective_psse_output_mode),
+        "heading",
+        "cases",
+    )
     if save_run_manifests:
         specification.to_csv(Path(RESULTS_DIR) / "running_spec.csv", index=False)
         write_plan(plans, str(Path(RESULTS_DIR) / "study_plan.json"))
@@ -137,10 +234,22 @@ def run_psse_studies(
         if result.get("status") != "completed":
             result["plot_status"] = "skipped_study_failed"
             if verbose:
-                print("[{}/{}] STUDY FAILED  {}: {}".format(number, total, name, result.get("error", "unknown error")))
+                reporter.emit(
+                    "[{}/{}] STUDY FAILED {}: {}".format(
+                        number, total, name, result.get("error", "unknown error")
+                    ),
+                    "failure",
+                    "cases",
+                )
             return
         if verbose:
-            print("[{}/{}] STUDY OK      {}".format(number, total, name))
+            reporter.emit(
+                "[{}/{}] STUDY OK {} ({:.2f}s)".format(
+                    number, total, name, float(result.get("elapsed_s", 0.0))
+                ),
+                "success",
+                "cases",
+            )
         csv_path = Path(result["csv"])
         if not plot_results:
             result["plot_status"] = "disabled"
@@ -148,7 +257,7 @@ def run_psse_studies(
                 csv_path.unlink(missing_ok=True)
                 result.pop("csv", None)
             if verbose:
-                print("[{}/{}] PLOT DISABLED {}".format(number, total, name))
+                reporter.emit("[{}/{}] PLOT DISABLED {}".format(number, total, name), "warning", "cases")
             return
         result_dir = Path(result["out"]).parent
         png_path = result_dir / (name + ".png")
@@ -160,14 +269,18 @@ def run_psse_studies(
                 csv_path.unlink(missing_ok=True)
                 result.pop("csv", None)
             if verbose:
-                print("[{}/{}] PLOT OK       {}".format(number, total, png_path))
+                reporter.emit("[{}/{}] PLOT OK {}".format(number, total, png_path), "success", "cases")
         except Exception as exc:
             result.update(plot_status="failed", plot_error=str(exc))
             plot_failures.append((name, str(exc)))
             # Preserve the CSV only for a failed plot; it is the quickest way
             # to diagnose a chandef/plotter mismatch.
             if verbose:
-                print("[{}/{}] PLOT FAILED   {}: {}".format(number, total, name, exc))
+                reporter.emit(
+                    "[{}/{}] PLOT FAILED {}: {}".format(number, total, name, exc),
+                    "failure",
+                    "cases",
+                )
 
     # StudyEngine invokes this callback before starting the next scenario.
     results = StudyEngine(config).run(plans, result_callback=on_result)
@@ -177,10 +290,14 @@ def run_psse_studies(
         json.dump(results, stream, indent=2, ensure_ascii=False)
     completed = sum(result.get("status") == "completed" for result in results)
     plotted = sum(result.get("plot_status") == "completed" for result in results)
-    print("Run summary: {} completed, {} failed; {} plots created, {} plot failures".format(
-        completed, len(results) - completed, plotted, len(plot_failures)
-    ))
-    print("Status file: {}".format(status_path))
+    reporter.emit(
+        "Run summary: {} completed, {} failed; {} plots created, {} plot failures".format(
+            completed, len(results) - completed, plotted, len(plot_failures)
+        ),
+        "heading" if len(results) == completed and not plot_failures else "warning",
+        "cases",
+    )
+    reporter.emit("Status file: {}".format(status_path), "heading", "cases")
     if results and completed == 0:
         raise RuntimeError("No PSS/E study completed, so no plots could be generated. See {}".format(status_path))
     if plot_failures:

@@ -7,7 +7,7 @@ from typing import List, Optional, Callable
 from hbess_open.analysis.gridlink.disturbance_tracking_plots import produce_disturbance_tracking_plot_pqv
 from hbess_open.analysis.gridlink.rise_settle_plots import produce_rise_settle_plot_pqv
 from hbess_open.analysis.gridlink.settling_analysis import StepAnalysisResults, analyse_step
-from hbess_open.io.psse_out import out_to_df
+from hbess_open.io.result_data import companion_path, initialisation_seconds, result_to_df
 from hbess_open.io.signal_dsl import ParsedDslSignal
 
 
@@ -31,10 +31,6 @@ def produce_disturbance_analysis_outputs(
         x86 = True,
         ):
 
-    if not x86:
-        raise NotImplementedError("This native package contains the PSS/E analysis path only")
-    extension = ".out"
-
     rise_settle_plots_subdir_path = os.path.join(os.path.dirname(output_png_path), rise_settle_plots_subdir_name)
     if not os.path.exists(rise_settle_plots_subdir_path):
         os.makedirs(rise_settle_plots_subdir_path)
@@ -56,12 +52,12 @@ def produce_disturbance_analysis_outputs(
 
     for i in tqdm(range(len(psout_paths)), desc="Voltage Disturbance Analysis"):
         psout_path = psout_paths[i]
-        json_path = psout_path.split(extension)[0] + ".json"
+        json_path = companion_path(psout_path, ".json")
 
         with open(json_path, 'r') as f:
             spec = json.load(f)
         
-        df = out_to_df(psout_path)
+        df = result_to_df(psout_path)
 
         if df_manipulation_fn is not None:
             df = df_manipulation_fn(df)
@@ -71,7 +67,7 @@ def produce_disturbance_analysis_outputs(
     
         df_copy = df
         if not x86:
-            init_time_sec = float(spec["substitutions"][init_time_spec_key])
+            init_time_sec = initialisation_seconds(spec, init_time_spec_key)
             df_copy = df_copy[df_copy.index > init_time_sec]
             df_copy.index = df_copy.index - init_time_sec
         df = df_copy

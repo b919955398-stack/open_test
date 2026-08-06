@@ -1,1 +1,1 @@
-"""Clause-specific PSS/E analysis routines."""
+"""Format-neutral clause analyses for PSS/E and PSCAD result data."""

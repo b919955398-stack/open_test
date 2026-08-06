@@ -6,7 +6,7 @@ from hbess_open.utils.progress import tqdm
 
 from hbess_open.analysis.gridlink.boxplots import make_boxplot
 from hbess_open.analysis.gridlink.characteristic_overlays import make_characteristic_overlay
-from hbess_open.io.psse_out import PsseOut as Out
+from hbess_open.io.result_data import SimulationOut as Out, companion_path, initialisation_seconds
 from hbess_open.io.signal_dsl import ParsedDslSignal
 
 import matplotlib.pyplot as plt
@@ -35,10 +35,6 @@ def produce_s5255_iq_outputs(
         x86 : bool = True,
         ):
     
-    if not x86:
-        raise NotImplementedError("This native package contains the PSS/E analysis path only")
-    extension = ".out"
-
     # This allows the plotter to be run with only TOV or only Faults
     study_types = []
     if fault_psout_paths is not None and len(fault_psout_paths) > 0:
@@ -81,7 +77,7 @@ def produce_s5255_iq_outputs(
 
         for i in tqdm(range(len(psout_paths)), desc=f"diq/dV studies ({study_type})"):
             psout_path = psout_paths[i]
-            json_path = psout_path.split(extension)[0] + ".json"
+            json_path = companion_path(psout_path, ".json")
 
             with open(json_path, 'r') as f:
                 spec = json.load(f)
@@ -99,7 +95,7 @@ def produce_s5255_iq_outputs(
 
             df_copy = df
             if not x86:
-                init_time_sec = float(spec["substitutions"][init_time_spec_key])
+                init_time_sec = initialisation_seconds(spec, init_time_spec_key)
                 df_copy = df_copy[df_copy.index > init_time_sec]
                 df_copy.index = df_copy.index - init_time_sec
             df = df_copy

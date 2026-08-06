@@ -1,2 +1,3 @@
 recursive-include src/hbess_open/appendices *.cls *.png
-include README.md LICENSE
+include README.md LICENSE ARCHITECTURE.md MIGRATION_MAP.md VALIDATION_REPORT.md RELEASE_NOTES_1.6.0.md RELEASE_NOTES_1.6.1.md RELEASE_NOTES_1.7.0.md RELEASE_NOTES_1.7.1.md
+include requirements.txt requirements-pscad.txt
