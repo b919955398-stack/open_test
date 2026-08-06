@@ -45,6 +45,22 @@ def parse_signal_profile(text, step_epsilon: float = 0.001) -> List[Tuple[float,
     return sorted(dedup.items())
 
 
+def initial_signal_value(value, default=None) -> float:
+    """Return the time-zero value from a numeric value or signal profile.
+
+    HY SPEC steady-state columns can contain a complete dynamic profile, for
+    example ``285, AT 5s ↓ 142.5``.  Dispatch must use only the first value;
+    the later points are applied separately by the compiled dynamic commands.
+    """
+    source = default if value in (None, "") else value
+    if source in (None, ""):
+        raise ValueError("Signal value is missing")
+    points = parse_signal_profile(source)
+    if points:
+        return float(points[0][1])
+    return float(source)
+
+
 def _interpolate(points: Sequence[Tuple[float, float]], time: float) -> Optional[float]:
     if not points:
         return None

@@ -1,6 +1,6 @@
 # Heywood BESS Open PSS/E Automation + PSCAD Post-processing
 
-版本：1.7.1
+版本：1.7.2
 
 这是按原 Heywood 项目整体章法整理的开放版：外层保留 PSS/E/PSCAD master、报告映射、示例和说明；所有被调用的逻辑统一放在 `src`。PSS/E 执行引擎已开放；PSCAD 已包含 Vslack/TOV SPEC 初始化、结果读取、通用 analysis/clause analysis、replot 接口、appendix 和 report tables 框架，暂不实现 PSCAD launch/project/volley runner。运行时不依赖私有 `Pallet`、已安装的 `gridlink`，也不会导入旧的 `heywoodbess` editable package。
 

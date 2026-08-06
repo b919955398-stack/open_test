@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List
 
 from .models import Event, Scenario, StudyPlan
-from .profiles import combine_playback, parse_signal_profile
+from .profiles import combine_playback, initial_signal_value, parse_signal_profile
 from .grid import impedance_from_fault_level, infinite_bus_voltage
 
 
@@ -18,12 +18,7 @@ def _number(value: Any, default=None):
 
 
 def _initial_profile_value(value: Any, default: float = 0.0) -> float:
-    if value in (None, ""):
-        return float(default)
-    points = parse_signal_profile(value)
-    if points:
-        return float(points[0][1])
-    return float(value)
+    return initial_signal_value(value, default)
 
 
 def resolve_vslack_expression(scenario: Scenario, expression: Any) -> Any:

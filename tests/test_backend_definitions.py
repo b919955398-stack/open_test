@@ -153,7 +153,9 @@ class BackendDefinitionTests(unittest.TestCase):
         fake = FakePsspy()
         backend = PsseBackend(fake, ProjectConfig("test.json", data))
         scenario = Scenario("sheet", 2, "case", True, {
-            "Ppoc_MW_sig": 100.0, "Qpoc_MVAr_init": 40.0, "Vpoc_pu_sig": 1.06
+            "Ppoc_MW_sig": "100, AT 5s ↓ 50",
+            "Qpoc_MVAr_init": "40, AT 5s ↓ 20",
+            "Vpoc_pu_sig": "1.06, AT 5s ↓ 1.01",
         })
         backend.dispatch(scenario, 0.01, 0.1)
         self.assertEqual([value for value in fake.machine_values.values()], [[25.0, 10.0]] * 4)

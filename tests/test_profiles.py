@@ -1,4 +1,4 @@
-from psse_open.profiles import combine_playback, parse_signal_profile
+from psse_open.profiles import combine_playback, initial_signal_value, parse_signal_profile
 import unittest
 
 
@@ -22,3 +22,9 @@ class ProfileTests(unittest.TestCase):
     def test_step_profile_accepts_comma_before_arrow(self):
         points = parse_signal_profile("0, AT 0.5s, ↑ 1, AT 0.93s ↓ 0")
         self.assertEqual(points[-3:], [(0.5, 1.0), (0.929, 1.0), (0.93, 0.0)])
+
+    def test_initial_signal_value_uses_profile_time_zero_value(self):
+        value = initial_signal_value(
+            "285, AT 5s ↓ 142.5, at 15s ↓ 14.25, AT 25s ↑ 285"
+        )
+        self.assertEqual(value, 285.0)

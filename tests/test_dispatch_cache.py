@@ -118,6 +118,19 @@ class DispatchCacheTests(unittest.TestCase):
             self.assertEqual(len(plan.groups), 1)
             self.assertEqual(len(plan.groups[0].plans), 2)
 
+    def test_profile_and_numeric_initial_power_share_dispatch_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = _config(root, root / "cache")
+            numeric = _plan("numeric")
+            profiled = _plan("profiled")
+            profiled.scenario.values["Ppoc_MW_sig"] = (
+                "285, AT 5s ↓ 142.5, at 15s ↓ 14.25, AT 25s ↑ 285"
+            )
+            plan = create_dispatch_plan([numeric, profiled], config)
+            self.assertEqual(len(plan.groups), 1)
+            self.assertEqual(plan.groups[0].signature["p_target_mw"], 285.0)
+
     def test_inverter_count_temperature_and_tap_prevent_unsafe_reuse(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

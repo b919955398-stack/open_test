@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .grid import fault_impedance_ohm, impedance_from_fault_level, infinite_bus_voltage
 from .models import Event, PlaybackPoint, Scenario
+from .profiles import initial_signal_value
 
 
 class PsseError(RuntimeError):
@@ -132,9 +133,9 @@ class PsseBackend:
             base = scenario.get("Pbase_MW", self.config.section("bases").get("p_mw"))
             if scr in (None, "") or base in (None, ""):
                 raise PsseError("Scenario has neither Grid_FL_MVA_sig nor Grid_SCR + plant base")
-            fault_level = float(scr) * float(base)
-        xr = float(scenario.get("Grid_X2R_sig"))
-        r_pu, x_pu = impedance_from_fault_level(float(fault_level), xr)
+            fault_level = initial_signal_value(scr) * initial_signal_value(base)
+        xr = initial_signal_value(scenario.get("Grid_X2R_sig"))
+        r_pu, x_pu = impedance_from_fault_level(initial_signal_value(fault_level), xr)
         self.set_branch_impedance(self.branch("grid"), r_pu, x_pu)
         return r_pu, x_pu
 
@@ -142,11 +143,11 @@ class PsseBackend:
         bases = self.config.section("bases")
         p = scenario.get("Ppoc_MW_sig")
         if p in (None, ""):
-            p = float(scenario.get("Ppoc_pu", 0.0)) * float(bases["p_mw"])
+            p = initial_signal_value(scenario.get("Ppoc_pu"), 0.0) * float(bases["p_mw"])
         q = scenario.get("Qpoc_MVAr_init")
         if q in (None, ""):
-            q = float(scenario.get("Qpoc_pu", 0.0)) * float(bases.get("q_mvar", bases["p_mw"]))
-        return float(p), float(q)
+            q = initial_signal_value(scenario.get("Qpoc_pu"), 0.0) * float(bases.get("q_mvar", bases["p_mw"]))
+        return initial_signal_value(p), initial_signal_value(q)
 
     def dispatch(self, scenario: Scenario, r_pu: float, x_pu: float) -> None:
         generators = self.system.get("generators", [])
@@ -157,7 +158,10 @@ class PsseBackend:
         poc = int(measurement["from_bus"])
         infinite = int(measurement["to_bus"])
         ckt = str(measurement.get("id", "1"))
-        v_poc = float(scenario.get("Vpoc_pu_sig", self.config.section("bases").get("normal_v_pu", 1.0)))
+        v_poc = initial_signal_value(
+            scenario.get("Vpoc_pu_sig"),
+            self.config.section("bases").get("normal_v_pu", 1.0),
+        )
 
         # Match the transparent calculation in the supplied open DMAT script:
         # solve the required infinite-bus schedule first, then compensate plant

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .models import Scenario, StudyPlan
+from .profiles import initial_signal_value
 
 
 DISPATCH_CACHE_SCHEMA_VERSION = 1
@@ -76,7 +77,7 @@ def _as_float(value: Any, name: str) -> float:
     if _is_missing(value):
         raise ValueError("Missing dispatch input {}".format(name))
     try:
-        result = float(value)
+        result = initial_signal_value(value)
     except (TypeError, ValueError):
         raise ValueError("Dispatch input {} must be numeric; got {!r}".format(name, value))
     if not math.isfinite(result):
