@@ -45,14 +45,14 @@ SHEETS_TO_PROCESS_CSR = [
     # "5254_Withstand",
     # "5254_CUO",
     # "5255_TOV",
-    "5255_UnbalFaults",
-    "5255_BalFaults",
+    # "5255_UnbalFaults",
+    # "5255_BalFaults",
     # "5257_PLR",
     # "52511_Fgrid",
     # "52511_Fgrid_AEMO_discussion",
     # "52513_Vgrid_droop",
-    "52513_Vref",
-    "52513_Qref",
+    # "52513_Vref",
+    # "52513_Qref",
     # "52513_PFref",
     # "52514_Pref",
     # "5258_Fprotection",
@@ -69,17 +69,17 @@ SHEETS_TO_PROCESS_CSR = [
 SHEETS_TO_PROCESS_DMAT = [
     # "324_325_Faults",
     # "326_MFRT",
-    # "329_TOV",
-    # "3210_Vref",
-    # "3210_Qref",
-    # "3210_PFref",
-    # "3211_Pref",
-    # "3217_Pref_POC_SCR1",
-    # "3212_Fgrid",
-    # "3210_3214_Vgrid",
-    # "3216_PhaseSteps",
-    # "3218_SCR_Change_Faults_SCR1",
-    # "3219_POC_SCR_Faults",
+    "329_TOV",
+    "3210_Vref",
+    "3210_Qref",
+    "3210_PFref",
+    "3211_Pref",
+    "3217_Pref_POC_SCR1",
+    "3212_Fgrid",
+    "3210_3214_Vgrid",
+    "3216_PhaseSteps",
+    "3218_SCR_Change_Faults_SCR1",
+    "3219_POC_SCR_Faults",
 ]
 
 SHEETS_TO_PROCESS_DMAT_CRG = [
@@ -179,7 +179,7 @@ SPEC_OPTIONS = {
     "enabled_only": True,                 # accepts True/False, 1/0, yes/no, on/off
     "enabled_column": "PSSE",
     "filters": {
-        "Test No": {"==": 1},          # or simply "<= 12"
+        # "Test No": {"==": 1},          # or simply "<= 12"
         # "Subtest No": {"==": 5},
         # "Batch": {"==": 2},
     },
