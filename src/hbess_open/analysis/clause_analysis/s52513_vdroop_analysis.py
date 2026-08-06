@@ -5,7 +5,7 @@ from hbess_open.utils.progress import tqdm
 from typing import List, Tuple, Optional, Callable
 import sys
 from hbess_open.analysis.gridlink.characteristic_overlays import make_characteristic_overlay
-from hbess_open.io.psse_out import PsseOut as Out
+from hbess_open.io.result_data import SimulationOut as Out, companion_path, initialisation_seconds
 from hbess_open.io.signal_dsl import ParsedDslSignal
 
 
@@ -32,14 +32,9 @@ def produce_vdroop_outputs(
         "Qpoc (MVAr)",
     ])
 
-    if not x86:
-        raise NotImplementedError("This native package contains the PSS/E analysis path only")
-    extension = ".out"
-
-
     for i in tqdm(range(len(psout_paths)), desc="dQ/dV studies"):
         psout_path = psout_paths[i]
-        json_path = psout_path.split(extension)[0] + ".json"
+        json_path = companion_path(psout_path, ".json")
 
         with open(json_path, 'r') as f:
             spec = json.load(f)
@@ -52,7 +47,7 @@ def produce_vdroop_outputs(
 
         df_copy = df
         if not x86:
-            init_time_sec = float(spec["substitutions"][init_time_spec_key])
+            init_time_sec = initialisation_seconds(spec, init_time_spec_key)
             df_copy = df_copy[df_copy.index > init_time_sec]
             df_copy.index = df_copy.index - init_time_sec
         df = df_copy
@@ -66,7 +61,7 @@ def produce_vdroop_outputs(
             filtered_df = df[df.index < settled_time]
 
             new_row = {
-                "Name": os.path.basename(psout_path).split(extension)[0],
+                "Name": os.path.splitext(os.path.basename(psout_path))[0],
                 "Step No": j+1,
                 "Vpoc (pu)": filtered_df[vpoc_rms_pu_signal_name].iloc[-1],
                 "Vref (pu)": filtered_df[vref_pu_signal_name].iloc[-1],

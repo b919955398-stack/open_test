@@ -1,4 +1,4 @@
-"""Replot previously completed PSS/E studies.
+"""Replot previously completed PSS/E or PSCAD studies.
 
 This replaces Pallet's ``Out`` wrapper with :mod:`hbess_open.io.psse_out` and
 pairs result/spec files by stem instead of relying on directory-list order.
@@ -13,6 +13,7 @@ from typing import Dict, Iterable, Optional
 import pandas as pd
 
 from hbess_open.io.psse_out import out_to_df
+from hbess_open.io.result_data import initialisation_seconds, result_to_df
 
 
 def _spec_index(root: Path) -> Dict[str, dict]:
@@ -103,4 +104,71 @@ def replot_psse(
         print("[{}/{}] {}".format(index, len(paths), sim_path.stem))
 
     print("Finished replotting.")
+    return results
+
+
+def replot_pscad(
+    extension: str,
+    replotter: object,
+    PLOT_INPUTS_DIR,
+    PLOT_OUT_DIR,
+    x86: bool = False,
+    remove_initialisation: bool = True,
+    init_time_spec_key: str = "TIME_Full_Init_Time_sec",
+    psout_run_index: int = 0,
+    channel_map: Optional[dict] = None,
+):
+    """Regenerate PNG/PDF plots from PSCAD PSOUT, pickle or CSV results.
+
+    The plotting policy remains project-specific: pass an object implementing
+    ``plot_from_df_and_dict``.  Binary reading is handled by the public
+    ``mhi.psout`` adapter in :mod:`hbess_open.io.pscad_out`.
+    """
+    if x86:
+        raise ValueError("replot_pscad expects x86=False")
+    if replotter is None or not hasattr(replotter, "plot_from_df_and_dict"):
+        raise TypeError("PSCAD replotter must implement plot_from_df_and_dict")
+    extension = extension.lower()
+    if extension not in {".psout", ".csv", ".pkl", ".pickle"}:
+        raise ValueError("Unsupported PSCAD replot extension: {}".format(extension))
+
+    input_root = Path(PLOT_INPUTS_DIR).resolve()
+    output_root = Path(PLOT_OUT_DIR).resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    if not input_root.is_dir():
+        raise FileNotFoundError("PLOT_INPUTS_DIR does not exist: {}".format(input_root))
+
+    fallback = _spec_index(input_root)
+    paths = list(_simulation_paths(input_root, extension))
+    if not paths:
+        print("No {} files found below {}".format(extension, input_root))
+        return []
+
+    results = []
+    print("Replotting {} PSCAD studies ...".format(len(paths)))
+    for index, sim_path in enumerate(paths, start=1):
+        relative_parent = sim_path.parent.relative_to(input_root)
+        case_output = output_root / relative_parent
+        case_output.mkdir(parents=True, exist_ok=True)
+        png_path = case_output / (sim_path.stem + ".png")
+        pdf_path = case_output / (sim_path.stem + ".pdf")
+        scenario = _load_scenario(sim_path, fallback)
+        remove_seconds = initialisation_seconds(scenario, init_time_spec_key) if remove_initialisation else 0.0
+        frame = result_to_df(
+            sim_path,
+            platform="pscad",
+            remove_first_seconds=remove_seconds,
+            psout_run_index=psout_run_index,
+            channel_map=channel_map,
+        )
+        replotter.plot_from_df_and_dict(
+            df=frame,
+            scenario_dict=scenario,
+            png_path=str(png_path),
+            pdf_path=str(pdf_path),
+        )
+        results.append({"file_name": sim_path.stem, "png": str(png_path), "pdf": str(pdf_path)})
+        print("[{}/{}] {}".format(index, len(paths), sim_path.stem))
+
+    print("Finished PSCAD replotting.")
     return results

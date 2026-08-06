@@ -36,20 +36,59 @@ class PsseBackend:
     def system(self) -> Dict[str, Any]:
         return self.config.section("system")
 
-    def initialize(self, sav_path: Path, log_stem: Path) -> None:
+    def _configure_native_output(self, log_stem: Path) -> str:
+        """Route PSS/E's own report/progress streams to console, files or quiet.
+
+        ``console`` keeps the same transparent PowerShell behaviour as the
+        company runner: load-flow iterations, tap/machine changes, dynamic
+        initialisation and RUN progress remain visible. ``files`` preserves
+        those streams beside the runtime log stem, while ``quiet`` suppresses
+        them for unattended batches.
+        """
+        configured = self.config.data.get("psse_output_mode")
+        if configured in (None, ""):
+            configured = "files" if bool(self.config.data.get("keep_psse_logs", False)) else "quiet"
+        mode = str(configured).strip().lower()
+        aliases = {
+            "console": "console",
+            "screen": "console",
+            "files": "files",
+            "file": "files",
+            "quiet": "quiet",
+            "off": "quiet",
+            "none": "quiet",
+        }
+        if mode not in aliases:
+            raise ValueError(
+                "psse_output_mode must be console, files or quiet; got {!r}".format(configured)
+            )
+        mode = aliases[mode]
+        selector = {"console": 1, "files": 2, "quiet": 6}[mode]
+        suffixes = {
+            "report_output": "_report.log",
+            "progress_output": "_progress.log",
+            "alert_output": "_alert.log",
+            "prompt_output": "_prompt.log",
+        }
+        for method_name, suffix in suffixes.items():
+            method = getattr(self.psspy, method_name, None)
+            if method is None:
+                continue
+            target = str(log_stem) + suffix if mode == "files" else ""
+            self._check(method(selector, target, [0, 0]), "configure {}".format(method_name))
+        return mode
+
+    def initialize(self, sav_path: Path, log_stem: Path, solve_load_flow: bool = True) -> None:
         buses = int(self.config.section("psse").get("max_buses", 200000))
         self._check(self.psspy.psseinit(buses), "psseinit")
-        if bool(self.config.data.get("keep_psse_logs", False)):
-            self.psspy.progress_output(2, str(log_stem) + "_progress.log", [0, 0])
-            self.psspy.alert_output(2, str(log_stem) + "_alert.log", [0, 0])
-        else:
-            # PSS/E output selector 6 suppresses the stream. These verbose
-            # files are useful only while debugging and are expensive over a
-            # large scenario batch.
-            self.psspy.progress_output(6, "", [0, 0])
-            self.psspy.alert_output(6, "", [0, 0])
+        self._configure_native_output(log_stem)
         self._check(self.psspy.case(str(sav_path)), "load SAV")
-        self.solve_load_flow()
+        if solve_load_flow:
+            self.solve_load_flow()
+
+    def save_case(self, sav_path: Path) -> None:
+        Path(sav_path).parent.mkdir(parents=True, exist_ok=True)
+        self._check(self.psspy.save(str(sav_path)), "save dispatched SAV")
 
     def solve_load_flow(self, repetitions: Optional[int] = None) -> None:
         count = int(repetitions or self.config.section("load_flow").get("solve_repetitions", 2))

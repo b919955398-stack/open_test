@@ -8,7 +8,7 @@ import pickle
 
 from hbess_open.analysis.gridlink.rise_settle_plots import produce_rise_settle_recovery_plot
 from hbess_open.analysis.gridlink.settling_analysis import analyse_step
-from hbess_open.io.psse_out import PsseOut as Out
+from hbess_open.io.result_data import SimulationOut as Out, initialisation_seconds
 from hbess_open.io.signal_dsl import ParsedDslSignal
 
 def produce_s5255_rise_settle_recovery_curve(
@@ -26,10 +26,6 @@ def produce_s5255_rise_settle_recovery_curve(
         df_manipulation_fn : Optional[Callable] = None,
         x86 : bool = True,
         ):
-    if not x86:
-        raise NotImplementedError("This native package contains the PSS/E analysis path only")
-
-
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -68,7 +64,7 @@ def produce_s5255_rise_settle_recovery_curve(
 
         df_copy = df
         if not x86:
-            init_time_sec = float(spec["substitutions"]["TIME_Full_Init_Time_sec"])
+            init_time_sec = initialisation_seconds(spec)
             df_copy = df_copy[df_copy.index > init_time_sec]
             df_copy.index = df_copy.index - init_time_sec
         df = df_copy

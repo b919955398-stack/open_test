@@ -1,0 +1,3 @@
+# Optional binary .psout reader published by Manitoba Hydro International.
+# Do not replace this with the unrelated package named "mhi".
+mhi.psout>=1.0

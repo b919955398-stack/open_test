@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# Editors and local environment
+.vscode/
+.idea/
+.env
+open_psse_config.json
+
+# Proprietary/local PSS/E inputs and SPEC workbooks
+*.sav
+*.raw
+*.dyr
+*.dll
+*.plb
+*.xlsx
+*.xls
+*.pkl
+
+# Generated simulation and plot outputs
+*.out
+*.psout
+*.log
+*_FAILED.txt
+results/
+outputs/
+replots/
+_work/
+_runtime/
+_dispatch_cache/
+running_spec.csv
+study_plan.json
+run_status.json
+export*.csv

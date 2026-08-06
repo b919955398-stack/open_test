@@ -8,7 +8,7 @@ from typing import List, Tuple, Optional, Dict, Callable
 from hbess_open.utils.progress import tqdm
 
 from hbess_open.analysis.gridlink.characteristic_overlays import make_characteristic_overlay
-from hbess_open.io.psse_out import PsseOut as Out
+from hbess_open.io.result_data import SimulationOut as Out, initialisation_seconds
 from hbess_open.io.signal_dsl import ParsedDslSignal
 import pickle
 
@@ -35,11 +35,6 @@ def produce_cumulative_ride_through_outputs(
 
         ):
     
-    if not x86:
-        raise NotImplementedError("This native package contains the PSS/E analysis path only")
-
-
-
     # Collect data
     low_x_char_points, low_y_char_points = zip(*low_characteristic_points)
     high_x_char_points, high_y_char_points = zip(*high_characteristic_points)
@@ -75,7 +70,7 @@ def produce_cumulative_ride_through_outputs(
 
         df_copy = df
         if not x86:
-            init_time_sec = float(spec["substitutions"][init_time_spec_key])
+            init_time_sec = initialisation_seconds(spec, init_time_spec_key)
             df_copy = df_copy[df_copy.index > init_time_sec]
             df_copy.index = df_copy.index - init_time_sec
         df = df_copy
