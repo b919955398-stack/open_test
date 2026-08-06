@@ -365,8 +365,18 @@ class DispatchCache:
     def target_path(self, group: DispatchGroup) -> Path:
         return self.directory / ("dispatch_" + group.short_key + ".sav")
 
-    def temporary_path(self, group: DispatchGroup) -> Path:
-        return self.directory / (".dispatch_{}_{}.tmp.sav".format(group.short_key, os.getpid()))
+    def temporary_path(self, group: DispatchGroup, staging_directory: Optional[Path] = None) -> Path:
+        """Return a PSS/E-compatible staging name with one conventional suffix.
+
+        PSS/E 34 is asked to write only inside the short runtime directory.  A
+        leading dot and the former ``.tmp.sav`` double suffix can be rejected
+        by its legacy application-file opener even though Windows accepts the
+        same path.  Python publishes the completed file into the persistent
+        cache afterwards.
+        """
+        directory = Path(staging_directory).resolve() if staging_directory else self.directory
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / ("dispatch_{}_{}_tmp.sav".format(group.short_key, os.getpid()))
 
     def publish(self, temporary_path: Path, target_path: Path) -> None:
         if not temporary_path.exists() or temporary_path.stat().st_size <= 0:

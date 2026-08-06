@@ -136,7 +136,10 @@ class StudyEngine:
                 reporter.emit(prefix + " CACHE HIT " + str(cached), "success", "cases")
                 continue
 
-            temporary = cache.temporary_path(group)
+            # Keep the filename presented to PSS/E short and conventional.
+            # Python moves the successfully written SAV into the persistent
+            # cache after PSS/E has closed it.
+            temporary = cache.temporary_path(group, work_dir)
             target = cache.target_path(group)
             started = time.perf_counter()
             try:
@@ -161,7 +164,13 @@ class StudyEngine:
                     reporter.command(prefix, "MAKE GRID INFINITE")
                     self.backend.make_grid_infinite()
                 call_hook(self.hooks, "after_dispatch", self.backend, representative, work_dir)
-                reporter.emit(prefix + " SAVE DISPATCHED SAV " + str(target), "load", "commands")
+                reporter.emit(
+                    prefix + " SAVE DISPATCHED SAV staging={} cache={}".format(
+                        temporary.name, target
+                    ),
+                    "load",
+                    "commands",
+                )
                 self.backend.save_case(temporary)
                 cache.publish(temporary, target)
                 cache.record_success(group, target)
@@ -223,6 +232,8 @@ class StudyEngine:
         results: List[dict] = []
         continue_on_error = bool(self.config.data.get("continue_on_error", True))
         keep_runtime = bool(self.config.data.get("keep_runtime_files", False))
+        keep_result_dyr = bool(self.config.data.get("keep_result_dyr", True))
+        keep_initialised_sav = bool(self.config.data.get("keep_initialised_sav", True))
         dispatch_settings = self.config.section("dispatch_cache")
         use_dispatch_cache = bool(dispatch_settings.get("enabled", False))
         reporter = self._console()
@@ -254,6 +265,14 @@ class StudyEngine:
                 out_path = result_dir / (plan.scenario.file_name + ".out")
                 csv_path = result_dir / (plan.scenario.file_name + ".csv")
                 json_path = result_dir / (plan.scenario.file_name + ".json")
+                result_dyr_path = result_dir / (plan.scenario.file_name + ".dyr")
+                initialised_sav_path = result_dir / (
+                    plan.scenario.file_name + "_initialised.sav"
+                )
+                initialised_staging_path = work_dir / (
+                    "initialised_{}_{:04d}.sav".format(os.getpid(), number)
+                )
+                initialised_staging_path.unlink(missing_ok=True)
                 if bool(self.config.data.get("keep_scenario_json", True)):
                     with open(json_path, "w", encoding="utf-8") as stream:
                         json.dump(
@@ -331,8 +350,42 @@ class StudyEngine:
                             self.backend.make_grid_infinite()
                         call_hook(self.hooks, "after_dispatch", self.backend, plan.scenario, work_dir)
 
+                    if keep_result_dyr:
+                        shutil.copy2(str(dyr_path), str(result_dyr_path))
+                        result["dyr"] = str(result_dyr_path)
+                        reporter.emit(
+                            prefix + " RESULT DYR " + str(result_dyr_path),
+                            "load",
+                            "commands",
+                        )
+
                     reporter.emit(prefix + " DYNAMIC INIT " + str(dyr_path), "load", "commands")
-                    self.backend.initialize_dynamics(work_dir, dyr_path, out_path, plan.playback)
+                    self.backend.initialize_dynamics(
+                        work_dir,
+                        dyr_path,
+                        out_path,
+                        plan.playback,
+                        initialised_sav_path=(
+                            initialised_staging_path if keep_initialised_sav else None
+                        ),
+                    )
+                    if keep_initialised_sav:
+                        if (
+                            not initialised_staging_path.exists()
+                            or initialised_staging_path.stat().st_size <= 0
+                        ):
+                            raise RuntimeError(
+                                "PSS/E did not create initialised SAV {}".format(
+                                    initialised_staging_path
+                                )
+                            )
+                        shutil.copy2(str(initialised_staging_path), str(initialised_sav_path))
+                        result["initialised_sav"] = str(initialised_sav_path)
+                        reporter.emit(
+                            prefix + " RESULT INITIALISED SAV " + str(initialised_sav_path),
+                            "load",
+                            "commands",
+                        )
                     call_hook(self.hooks, "after_dynamic_initialization", self.backend, plan.scenario, work_dir)
                     current_time = 0.0
                     for event in plan.events:
@@ -390,6 +443,7 @@ class StudyEngine:
                 finally:
                     self.backend.halt()
                     os.chdir(str(previous_cwd))
+                    initialised_staging_path.unlink(missing_ok=True)
 
                 results.append(result)
                 if result_callback is not None:

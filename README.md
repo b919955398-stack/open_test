@@ -1,6 +1,6 @@
 # Heywood BESS Open PSS/E Automation + PSCAD Post-processing
 
-版本：1.7.2
+版本：1.7.3
 
 这是按原 Heywood 项目整体章法整理的开放版：外层保留 PSS/E/PSCAD master、报告映射、示例和说明；所有被调用的逻辑统一放在 `src`。PSS/E 执行引擎已开放；PSCAD 已包含 Vslack/TOV SPEC 初始化、结果读取、通用 analysis/clause analysis、replot 接口、appendix 和 report tables 框架，暂不实现 PSCAD launch/project/volley runner。运行时不依赖私有 `Pallet`、已安装的 `gridlink`，也不会导入旧的 `heywoodbess` editable package。
 
@@ -194,7 +194,7 @@ master 只使用一个 `SPEC_OPTIONS` 配置块。`sources` 中可启用/停用�
 
 sheet 和文件名支持 `*`、`?` 通配符；sheet 前加 `!` 表示排除。行筛选支持 `==`、`!=`、`>`、`>=`、`<`、`<=`、`in`、`not in` 和 `between`，也可简写成 `"Batch": "== 2"`。`enabled_only` 会稳健识别布尔值、`1/0`、`yes/no` 和 `on/off`。加载结果包含 `Spec_Source`、`Spec_Path`、`Sheet_Name`、`Spec_Row`，因此缺失 sheet、错误筛选列或重复 `File_Name` 都会给出可定位的信息。
 
-`PLOT_RESULTS = True` 时，每个成功案例会立即在 `RESULTS_DIR/<Category>/` 下生成同名 PNG 和 PDF，然后才运行下一个案例。终端会显示 SPEC、Dispatch Key、时间推进、command、`STUDY OK/FAILED` 与 `PLOT OK/FAILED`；完整路径、cache 状态、elapsed time 和错误写入结果根目录的 `run_status.json`。若缺少 chandef channel，错误会直接给出缺失 channel 名，而不是静默跳过。
+`PLOT_RESULTS = True` 时，每个成功案例会立即在 `RESULTS_DIR/<Category>/` 下形成同名 DYR、JSON、OUT、PNG、PDF 和 `_initialised.sav` 文件组，然后才运行下一个案例。`_initialised.sav` 在 DYR、动态参数和 channels 装载完成后、`STRT` 前保存；它与内部 `_dispatch_cache` 的静态 dispatched SAV 分开。终端会显示 SPEC、Dispatch Key、时间推进、command、`STUDY OK/FAILED` 与 `PLOT OK/FAILED`；完整路径、cache 状态、elapsed time 和错误写入结果根目录的 `run_status.json`。若缺少 chandef channel，错误会直接给出缺失 channel 名，而不是静默跳过。
 
 `MODEL_DIR` 应包含 SAV、DYR、`.savdef`、`.initdef`、`.chandef` 以及 OEM 模型所需 DLL/TXT/CFG。存在多份版本时，将 `open_psse_config.example.json` 复制为该目录下的 `open_psse_config.json` 并指定文件名。
 

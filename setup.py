@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="heywood-bess-native-psse",
-    version="1.7.2",
+    version="1.7.3",
     description="Transparent SPEC-driven PSS/E automation and PSCAD post-processing",
     package_dir={"": "src"},
     packages=find_packages(where="src"),

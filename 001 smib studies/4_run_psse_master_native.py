@@ -204,6 +204,8 @@ KEEP_CSV_RESULTS = False         # temporary CSV is removed after a successful p
 SAVE_RUN_MANIFESTS = False       # running_spec.csv and study_plan.json
 KEEP_RUNTIME_FILES = False       # one shared temporary runtime, not _work/<case>
 KEEP_PSSE_LOGS = False           # legacy fallback when PSSE_OUTPUT_MODE is None
+KEEP_RESULT_DYR = True           # preserve <case>.dyr in the result set
+KEEP_INITIALISED_SAV = True      # preserve <case>_initialised.sav in the result set
 PSSE_OUTPUT_MODE = "console"     # console | files | quiet
 VERBOSE_RUN_STATUS = True
 
@@ -374,6 +376,8 @@ if __name__ == "__main__":
             save_run_manifests=SAVE_RUN_MANIFESTS,
             keep_runtime_files=KEEP_RUNTIME_FILES,
             keep_psse_logs=KEEP_PSSE_LOGS,
+            keep_result_dyr=KEEP_RESULT_DYR,
+            keep_initialised_sav=KEEP_INITIALISED_SAV,
             psse_output_mode=PSSE_OUTPUT_MODE,
             use_dispatch_cache=USE_DISPATCH_CACHE,
             dispatch_cache_dir=DISPATCH_CACHE_DIR,

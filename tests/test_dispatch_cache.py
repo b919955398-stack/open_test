@@ -75,6 +75,7 @@ class _Backend:
         self.initializations = []
         self.dispatch_calls = 0
         self.save_calls = 0
+        self.save_paths = []
 
     def initialize(self, sav_path, log_stem, solve_load_flow=True):
         self.initializations.append((Path(sav_path).name, bool(solve_load_flow)))
@@ -93,9 +94,14 @@ class _Backend:
 
     def save_case(self, sav_path):
         self.save_calls += 1
+        self.save_paths.append(Path(sav_path))
         Path(sav_path).write_bytes(b"solved dispatched sav")
 
-    def initialize_dynamics(self, work_dir, dyr_path, out_path, playback):
+    def initialize_dynamics(
+        self, work_dir, dyr_path, out_path, playback, initialised_sav_path=None
+    ):
+        if initialised_sav_path is not None:
+            Path(initialised_sav_path).write_bytes(b"initialised sav")
         Path(out_path).write_bytes(b"out")
 
     def apply_event(self, event, scenario):
@@ -184,6 +190,11 @@ class DispatchCacheTests(unittest.TestCase):
 
             self.assertEqual(first.backend.dispatch_calls, 1)
             self.assertEqual(first.backend.save_calls, 1)
+            staged = first.backend.save_paths[0]
+            self.assertEqual(staged.parent.name.startswith("hbess_psse_"), True)
+            self.assertFalse(staged.name.startswith("."))
+            self.assertTrue(staged.name.endswith("_tmp.sav"))
+            self.assertNotIn(".tmp.sav", staged.name)
             self.assertEqual(first.backend.initializations.count(("base.sav", True)), 1)
             self.assertEqual(sum(not solved for _name, solved in first.backend.initializations), 2)
             self.assertTrue(all(item["status"] == "completed" for item in first_results))
