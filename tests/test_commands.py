@@ -48,3 +48,49 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(playback)
         self.assertGreater(playback[0].voltage_pu, 0.9)
         self.assertNotEqual(playback[0].voltage_pu, 1.0)
+
+    def test_tov_plan_rejects_a_silent_flat_run(self):
+        scenario = Scenario("5255_TOV", 2, "flat_tov", True, {
+            "Category": "5255_TOV",
+            "U_Ov": 1.2,
+            "Post_Init_Duration_s": 2.0,
+            "Vslack_pu_psse": "1, WITH SCALING=1.057",
+        })
+        with self.assertRaisesRegex(ValueError, "no executable voltage disturbance"):
+            build_plan(scenario)
+
+    def test_real_csr_tov_shape_compiles_to_nonflat_playback(self):
+        scenario = Scenario("5255_TOV", 2, "csr_tov", True, {
+            "Category": "5255_TOV",
+            "U_Ov": 1.2,
+            "Fault_Time": 0.5,
+            "Fault_Duration": 0.43,
+            "Post_Init_Duration_s": 2.0,
+            "Vslack_pu_psse": (
+                "1, AT 0.5s ↑ 1.1320754716981132, "
+                "AT 0.93s ↓ 1, WITH SCALING = 1.057106"
+            ),
+        })
+        plan = build_plan(scenario)
+        voltages = [point.voltage_pu for point in plan.playback]
+        self.assertGreater(max(voltages) - min(voltages), 0.1)
+        times = [point.time for point in plan.playback]
+        self.assertIn(0.5, times)
+        self.assertIn(0.93, times)
+
+    def test_tov_mvar_columns_compile_to_apply_and_clear_events(self):
+        scenario = Scenario("329_TOV", 2, "mvar_tov", True, {
+            "Category": "329_TOV",
+            "TOV_MVAr": 145.0,
+            "Fault_Time_sig": 0.4,
+            "Fault_Duration_sig": 0.2,
+            "Post_Init_Duration_s": 2.0,
+        })
+        plan = build_plan(scenario)
+        self.assertEqual(
+            [event.kind for event in plan.events],
+            ["tov_shunt_apply", "tov_shunt_clear"],
+        )
+        self.assertEqual(plan.events[0].parameters["mvar"], 145.0)
+        self.assertAlmostEqual(plan.events[0].time, 0.4)
+        self.assertAlmostEqual(plan.events[1].time, 0.6)

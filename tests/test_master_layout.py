@@ -17,6 +17,13 @@ class MasterLayoutTests(unittest.TestCase):
         }
         self.assertTrue({
             "RUN_STUDIES",
+            "RUN_ANALYSIS",
+            "REPLOT_PSSE",
+            "CREATE_APPENDIX",
+            "CREATE_REPORT_TABLES",
+            "ANALYSIS_TO_RUN",
+        }.issubset(assigned))
+        self.assertTrue({
             "PLOT_RESULTS",
             "KEEP_CSV_RESULTS",
             "SAVE_RUN_MANIFESTS",
@@ -31,17 +38,16 @@ class MasterLayoutTests(unittest.TestCase):
             "RUN_PROGRESS_LEVEL",
             "PRINT_CASE_SPEC",
             "SPEC_FIELDS_TO_PRINT",
-            "RUN_ANALYSIS",
-            "REPLOT_PSSE",
-            "CREATE_APPENDIX",
-            "CREATE_REPORT_TABLES",
-            "ANALYSIS_TO_RUN",
-            "SPEC_OPTIONS",
-        }.issubset(assigned))
+        }.isdisjoint(assigned))
+        self.assertNotIn("SPEC_OPTIONS", assigned)
         self.assertNotIn("from heywoodbess", source)
         self.assertIn("from hbess_open.analysis.run_analysis_psse", source)
         self.assertIn("from hbess_open.appendices.create_appendix", source)
-        self.assertIn("load_spec_options(SPEC_OPTIONS)", source)
+        self.assertIn("if RUN_STUDIES:", source)
+        self.assertIn("specification = load_specs_from_multiple_xlsx(", source)
+        self.assertIn("spec = get_vslacks(specification, MODEL_DIR, slack_bus_num)", source)
+        self.assertIn("spec = pd.concat([spec, spec_non_vslack]", source)
+        self.assertIn("RESULTS_DIR=RESULTS_DIR\n        )", source)
 
     def test_only_src_contains_runtime_packages(self):
         root = Path(__file__).resolve().parents[1]

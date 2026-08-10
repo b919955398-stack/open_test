@@ -1,6 +1,6 @@
 # Heywood BESS Open PSS/E Automation + PSCAD Post-processing
 
-版本：1.7.3
+版本：1.8.0
 
 这是按原 Heywood 项目整体章法整理的开放版：外层保留 PSS/E/PSCAD master、报告映射、示例和说明；所有被调用的逻辑统一放在 `src`。PSS/E 执行引擎已开放；PSCAD 已包含 Vslack/TOV SPEC 初始化、结果读取、通用 analysis/clause analysis、replot 接口、appendix 和 report tables 框架，暂不实现 PSCAD launch/project/volley runner。运行时不依赖私有 `Pallet`、已安装的 `gridlink`，也不会导入旧的 `heywoodbess` editable package。
 
@@ -32,7 +32,7 @@ heywood_psse_native/
 └── setup.py
 ```
 
-两个 master 都会把本项目的 `src` 强制放到 `sys.path[0]`，并在启动时打印 `hbess_open` 的真实来源。因此之前执行过的 `pip install -e C:\...\src` 不会抢占本项目导入。
+两个 master 都会把本项目的 `src` 强制放到 `sys.path[0]`，因此之前执行过的 `pip install -e C:\...\src` 不会抢占本项目导入。
 
 ## PSCAD 本版范围
 
@@ -85,7 +85,7 @@ python -m pip install -r requirements-pscad.txt
 
 ## PSS/E dispatched-case cache
 
-PSS/E runner 现在先汇总全部 selected SPEC，再按有效初始工况生成 Dispatch Key。Key 固定包含初始 P/Q/V、fault level、X/R 和 infinite-grid 状态；可能影响初始潮流的 inverter count、temperature、tap setting、control mode 字段会自动加入，也可通过 `DISPATCH_KEY_COLUMNS` 明确指定。
+PSS/E runner 先汇总全部 selected SPEC，再按有效初始工况生成 Dispatch Key。Key 固定包含初始 P/Q/V、fault level、X/R 和 infinite-grid 状态；可能影响初始潮流的 inverter count、temperature、tap setting、control mode 字段会自动加入。
 
 ```text
 selected SPEC rows
@@ -96,21 +96,11 @@ selected SPEC rows
 
 例如 235 个动态场景只有 12 个唯一初始工况时，只执行 12 次 P/Q/V dispatch。第一批运行生成缺失 dispatched SAV 后立即复用；后续批次在模型未变化时直接 cache hit。这个过程仍是单进程顺序运行，不会额外占用并发 PSS/E licence。
 
-cache 位于 master 的 `DISPATCH_CACHE_DIR`。namespace 会根据 source SAV、savdef/initdef/chandef、有效静态配置和 `project_hooks.py` 自动生成 fingerprint；模型发生变化时不会误用旧 SAV。通常保持：
-
-```python
-USE_DISPATCH_CACHE = True
-REBUILD_DISPATCH_CACHE = False
-VERIFY_DISPATCH_CACHE_HASHES = False
-DISPATCH_KEY_COLUMNS = []
-AUTO_DISPATCH_KEY_COLUMNS = True
-```
-
-如果 `before_dispatch` 或 `after_dispatch` 使用了额外 SPEC 字段，必须把字段名加入 `DISPATCH_KEY_COLUMNS`。只在需要强制重做相同模型 namespace 中的 dispatched SAV 时，临时设置 `REBUILD_DISPATCH_CACHE = True`。
+cache 位于结果根目录旁的 `_dispatch_cache`。namespace 会根据 source SAV、savdef/initdef/chandef、有效静态配置和 `project_hooks.py` 自动生成 fingerprint；模型发生变化时不会误用旧 SAV。cache 和其他技术默认值都在 `run_psse_studies()` 内，不需要在 master 中判断。
 
 ## Plain-text run progress
 
-master 默认 `RUN_PROGRESS_LEVEL = "commands"`，不使用颜色或 ANSI 字符。终端依次输出 `[BATCH]`、`[SPEC]`、`[DISPATCH]`、`[LOAD]`、`[COMMAND]`、`[OK]`、`[FAILED]`，包括：
+runner 默认使用 `commands` 级别，不使用颜色或 ANSI 字符。终端依次输出 `[BATCH]`、`[SPEC]`、`[DISPATCH]`、`[LOAD]`、`[COMMAND]`、`[OK]`、`[FAILED]`，包括：
 
 - selected SPEC 数量与 category 分布；
 - 完整 Dispatch Plan、每个 key 的初始 P/Q/V/grid 参数和复用数量；
@@ -119,32 +109,22 @@ master 默认 `RUN_PROGRESS_LEVEL = "commands"`，不使用颜色或 ANSI 字符
 - 每个 fault apply/clear、grid change、model change、transformer/load/TOV command；
 - study/plot 状态与 elapsed time。
 
-`RUN_PROGRESS_LEVEL = "cases"` 只显示 case 级进度；`"quiet"` 静默。将 `SPEC_FIELDS_TO_PRINT = ["*"]` 可输出每行全部非空 SPEC 字段。
-
-`PSSE_OUTPUT_MODE = "console"` 默认同时保留 PSS/E 自己的原生 PowerShell 输出，包括 FNSL mismatch/iteration、tap 与 machine data 改动、initial-condition check、channel 建立及动态 RUN 进度。设为 `"files"` 时会分别写入 `_report.log`、`_progress.log`、`_alert.log` 和 `_prompt.log`；设为 `"quiet"` 才会静默这些原生流。这个开关只改变可见性，不改变 dispatch 或动态仿真数值。
+PSS/E 原生输出默认为 `console`，包括 FNSL mismatch/iteration、tap 与 machine data 改动、initial-condition check、channel 建立及动态 RUN 进度。这些默认同样由 runner 管理。
 
 默认情况下，Study runner 会为每个案例保留下列结果：
 
 ```text
 <Category>/<File_Name>.out
 <Category>/<File_Name>.json
+<Category>/<File_Name>.dyr
+<Category>/<File_Name>_initialised.sav
 <Category>/<File_Name>.png
 <Category>/<File_Name>.pdf
 ```
 
-每个案例完成后会立刻转换数据并生成 PNG/PDF，再开始下一个案例。dispatched SAV cache 不改变这一顺序。绘图用 CSV 默认是临时文件，成功画图后删除；若画图失败则保留 CSV 便于检查 chandef。Analysis、Replot、Appendix 仍共享 OUT、JSON 和同一目录结构。
+每个 OUT 直接解码到内存，不再先写临时 CSV 又立即读回。上一个案例的绘图可与下一个 PSS/E 仿真重叠；画图失败或 TOV 验证失败时才保留诊断 CSV。Analysis、Replot、Appendix 仍共享 OUT、JSON 和同一目录结构。
 
-模型 SAV、DYR、DLL、TXT、CFG 只复制到一个共享临时运行目录一次，整个批次结束后清理，不再生成 `_work/<File_Name>`。master 中的精简输出开关为：
-
-```python
-KEEP_CSV_RESULTS = False
-SAVE_RUN_MANIFESTS = False
-KEEP_RUNTIME_FILES = False
-KEEP_PSSE_LOGS = False
-PSSE_OUTPUT_MODE = "console"
-```
-
-需要排查问题时可单独打开相应开关；正常批量运行保持 `False` 可以显著减少磁盘文件和重复复制。
+模型 SAV、DYR、DLL、TXT、CFG 只复制到一个共享临时运行目录一次，整个批次结束后清理，不再生成 `_work/<File_Name>`。已完整成功的六件结果会按模型与算例 fingerprint 安全续跑；任一输入改变或结果不完整都会重跑。这些技术选项全部位于 `run_psse_studies()`，master 保持公司原有的业务架构。
 
 ## 安装与运行
 
@@ -173,28 +153,16 @@ python -m pip install -e .
 
 在 master 中修改：
 
-- `SPEC_OPTIONS` 中的工作簿、sheet 选择和场景筛选；
-- `MODEL_DIR`、`RESULTS_ROOT` 和 slack bus；
+- 四组 `SHEETS_TO_PROCESS_*` 和需要的行筛选；
+- `XLSX_DIR`、`MODEL_DIR`、结果路径和 slack bus；
 - 五个运行开关；
 - Analysis 特性点、Appendix 标题/日期/版本等项目参数。
 
-## SPEC options
+## SPEC 选择
 
-master 只使用一个 `SPEC_OPTIONS` 配置块。`sources` 中可启用/停用工作簿，并设置它参与 `studies`、`appendix`、`tables` 中的哪些流程。空 sheet 列表会跳过该工作簿，不要求文件存在。
+PSS/E master 现在完全沿用公司版的结构：四组 sheet 列表传给 `load_specs_from_multiple_xlsx()`，在 `if RUN_STUDIES:` 内执行 Vslack 展开、`PSSE == True` 筛选及可选的 Test/Subtest/Batch 筛选。运行器技术开关不放在 master。
 
-```python
-"sheets": ["5255_*", "!5255_*_OLD"],
-"filters": {"Test No": {"<=": 12}, "Batch": {"==": 2}},
-"include_categories": ["*Fault*"],
-"exclude_file_names": ["*_OLD"],
-"text_filter": None,
-"limit": None,
-"duplicate_policy": "error",
-```
-
-sheet 和文件名支持 `*`、`?` 通配符；sheet 前加 `!` 表示排除。行筛选支持 `==`、`!=`、`>`、`>=`、`<`、`<=`、`in`、`not in` 和 `between`，也可简写成 `"Batch": "== 2"`。`enabled_only` 会稳健识别布尔值、`1/0`、`yes/no` 和 `on/off`。加载结果包含 `Spec_Source`、`Spec_Path`、`Sheet_Name`、`Spec_Row`，因此缺失 sheet、错误筛选列或重复 `File_Name` 都会给出可定位的信息。
-
-`PLOT_RESULTS = True` 时，每个成功案例会立即在 `RESULTS_DIR/<Category>/` 下形成同名 DYR、JSON、OUT、PNG、PDF 和 `_initialised.sav` 文件组，然后才运行下一个案例。`_initialised.sav` 在 DYR、动态参数和 channels 装载完成后、`STRT` 前保存；它与内部 `_dispatch_cache` 的静态 dispatched SAV 分开。终端会显示 SPEC、Dispatch Key、时间推进、command、`STUDY OK/FAILED` 与 `PLOT OK/FAILED`；完整路径、cache 状态、elapsed time 和错误写入结果根目录的 `run_status.json`。若缺少 chandef channel，错误会直接给出缺失 channel 名，而不是静默跳过。
+每个成功案例会在 `RESULTS_DIR/<Category>/` 下形成同名 DYR、JSON、OUT、PNG、PDF 和 `_initialised.sav` 文件组。`_initialised.sav` 在 DYR、动态参数和 channels 装载完成后、`STRT` 前保存；它与内部 `_dispatch_cache` 的静态 dispatched SAV 分开。终端会显示 SPEC、Dispatch Key、时间推进、command、`STUDY OK/FAILED` 与 `PLOT OK/FAILED`；完整路径、cache 状态、分阶段耗时和错误写入 `run_status.json`。若缺少 chandef channel，错误会直接给出缺失 channel 名，而不是静默跳过。
 
 `MODEL_DIR` 应包含 SAV、DYR、`.savdef`、`.initdef`、`.chandef` 以及 OEM 模型所需 DLL/TXT/CFG。存在多份版本时，将 `open_psse_config.example.json` 复制为该目录下的 `open_psse_config.json` 并指定文件名。
 

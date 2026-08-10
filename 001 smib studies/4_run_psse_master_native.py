@@ -1,50 +1,36 @@
-"""Heywood BESS master script using the open/native PSS/E runner.
-
-The layout intentionally follows the supplied company master: clause choices,
-study settings, analysis, replotting, appendices, report tables, then one main
-entry point. Only the PSS/E automation layer has been replaced.
-"""
-
 import os
 import sys
 from pathlib import Path
 
-# -----------------------------------------------------------------------------
-# LOCAL PACKAGE PRIORITY
-# -----------------------------------------------------------------------------
+import pandas as pd
 
-# Prefer this project's ``src`` tree over any old editable installation.
+
+# Prefer this project's open/native packages over an older installation.
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 SRC_DIR = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-import hbess_open
-import psse_open
-from hbess_open.open_psse.specs import load_spec_options, now_str, spec_source_lists
+from hbess_open.open_psse.specs import load_specs_from_multiple_xlsx, now_str
 from hbess_open.plotting.hbess_psse_plotter import HbessPssePlotter
 from hbess_open.plotting.process_and_calc_psse import pre_process_dataframe
 from hbess_open.studyrunners.psse_study_runner import get_vslacks, run_psse_studies
-
 from hbess_open.analysis.run_analysis_psse import run_analysis_psse
-from hbess_open.appendices.create_appendix import create_appendix_heywoodbess
 from hbess_open.plotting.replotters import replot_psse
+from hbess_open.appendices.create_appendix import create_appendix_heywoodbess
 from hbess_open.report_tables.create_report_tables_spec import create_report_table_CSR_DMAT
 
 
-# -----------------------------------------------------------------------------
-# CLAUSES
-# -----------------------------------------------------------------------------
-
+#------------------------------------------------------------------ CLAUSES --------------------------------------------------------------------------------------
 x86 = True
 NOW_STR = now_str()
 APPENDIX_PROJECT_NAME = "Heywood BESS"
 
 SHEETS_TO_PROCESS_CSR = [
-    # "5253_F",
-    # "5254_Withstand",
-    # "5254_CUO",
-    # "5255_TOV",
+    # "5253_F", #working
+    # "5254_Withstand", #bad results
+    # "5254_CUO", #working
+    # "5255_TOV", #working
     # "5255_UnbalFaults",
     # "5255_BalFaults",
     # "5257_PLR",
@@ -63,8 +49,9 @@ SHEETS_TO_PROCESS_CSR = [
     # "52515_SCR_Change_NoFault",
     # "5258_ActivePowerReduction",
     # "MFRT",
-    # "5255_BalFaults_DD_R2",
+    # "5255_BalFaults_DD_R2"
 ]
+
 
 SHEETS_TO_PROCESS_DMAT = [
     # "324_325_Faults",
@@ -102,26 +89,39 @@ SHEETS_TO_PROCESS_FLATRUN = [
     # "CORNER_POINTS",
 ]
 
+
 ANALYSIS_TO_RUN = [
-    # "dP/df characteristic",
-    # "CUO",
-    # "Vdroop characteristic",
-    # "Vgrid step analysis",
-    # "Vref step analysis",
-    # "Qref step analysis",
-    # "PFref step analysis",
-    # "S5258 Active Power Reduction",
-    # "diq/dV characteristic",
-    # "IQ Rise Settle & P Recovery Curve",
-    # "Frequency ride-through characteristic",
-    # "Voltage ride-through characteristic",
-]
+
+            # "dP/df characteristic",
 
 
-# -----------------------------------------------------------------------------
-# RUN SETTINGS + PATHS
-# -----------------------------------------------------------------------------
+            # "CUO",
 
+# # 5.2.5.13
+            # "Vdroop characteristic",
+            # "Vgrid step analysis",
+            # "Vref step analysis",
+            # "Qref step analysis",
+            # "PFref step analysis",
+
+# # # # 5.2.5.8
+            # "S5258 Active Power Reduction"
+# # # 5.5
+            # "diq/dV characteristic",
+            # "IQ Rise Settle & P Recovery Curve",
+# # # 5.3
+            # "Frequency ride-through characteristic",
+# # # 5.4
+            # "Voltage ride-through characteristic",
+
+
+            ]
+
+#------------------------------------------------------------------ END OF CLAUSES --------------------------------------------------------------------------------------
+
+
+
+#----------------------------------------------------------------------------- SET RUN SETTINGS + PATHS  ------------------------------------------------------------------------------
 SAV_VERSION = "v0-0-4"
 DYR_VERSION = "v0-0-4"
 
@@ -130,271 +130,157 @@ XLSX_PATH_CSR = os.path.join(XLSX_DIR, "HY_Spec_CSR_300.xlsx")
 XLSX_PATH_DMAT = os.path.join(XLSX_DIR, "HY_Spec_DMAT.xlsx")
 XLSX_PATH_DMAT_CRG = os.path.join(XLSX_DIR, "HY_Spec_DMAT_CRG.xlsx")
 XLSX_PATH_DMAT_FLATRUN = os.path.join(XLSX_DIR, "HY_Spec_FLATTEST.xlsx")
+#FLATRUN_XLSX = os.path.join(r"C:\Grid\chen\cg\psse\flatrun_spec", "CGBess_Spec_Flatrun.xlsx")
 
-MODEL_DIR = r"C:\Grid\WorkFolder\Heywood work folder\open test\psse model"
-RESULTS_ROOT = r"C:\Grid\WorkFolder\Heywood work folder\open test"
-RESULTS_DIR = os.path.join(
-    RESULTS_ROOT,
-    "{}_sav_{}_dyr".format(SAV_VERSION, DYR_VERSION),
-    NOW_STR,
-)
-SLACK_BUS_NUM = 331182
-
-
-# -----------------------------------------------------------------------------
-# SPEC OPTIONS — the single source of truth for every workflow
-# -----------------------------------------------------------------------------
-
-SPEC_OPTIONS = {
-    "sources": [
-        {
-            "name": "CSR",
-            "path": XLSX_PATH_CSR,
-            "sheets": SHEETS_TO_PROCESS_CSR,  # exact names or e.g. ["5255_*", "!5255_*_OLD"]
-            "enabled": True,
-            "workflows": ["studies", "appendix", "tables"],
-        },
-        {
-            "name": "DMAT",
-            "path": XLSX_PATH_DMAT,
-            "sheets": SHEETS_TO_PROCESS_DMAT,
-            "enabled": True,
-            "workflows": ["studies", "appendix", "tables"],
-        },
-        {
-            "name": "DMAT_CRG",
-            "path": XLSX_PATH_DMAT_CRG,
-            "sheets": SHEETS_TO_PROCESS_DMAT_CRG,
-            "enabled": True,
-            "workflows": ["studies", "appendix", "tables"],
-        },
-        {
-            "name": "FLATRUN",
-            "path": XLSX_PATH_DMAT_FLATRUN,
-            "sheets": SHEETS_TO_PROCESS_FLATRUN,
-            "enabled": True,
-            "workflows": ["studies"],
-        },
-    ],
-    "enabled_only": True,                 # accepts True/False, 1/0, yes/no, on/off
-    "enabled_column": "PSSE",
-    "filters": {
-        # "Test No": {"==": 1},          # or simply "<= 12"
-        # "Subtest No": {"==": 5},
-        # "Batch": {"==": 2},
-    },
-    "include_categories": [],             # glob examples: ["*Fault*", "Fgrid"]
-    "exclude_categories": [],
-    "include_file_names": [],             # glob examples: ["HY_52511_*"]
-    "exclude_file_names": [],
-    "text_filter": None,                  # searches every text column
-    "limit": None,                        # e.g. 3 for a quick smoke test
-    "strict_sheets": True,                # typo/missing sheet raises a useful error
-    "duplicate_policy": "error",          # error | first | last | allow
-}
-
-
-# -----------------------------------------------------------------------------
-# RUN PSS/E STUDIES
-# -----------------------------------------------------------------------------
 
 RUN_STUDIES = True
-PLOT_RESULTS = True              # plotted immediately after each completed case
-KEEP_CSV_RESULTS = False         # temporary CSV is removed after a successful plot
-SAVE_RUN_MANIFESTS = False       # running_spec.csv and study_plan.json
-KEEP_RUNTIME_FILES = False       # one shared temporary runtime, not _work/<case>
-KEEP_PSSE_LOGS = False           # legacy fallback when PSSE_OUTPUT_MODE is None
-KEEP_RESULT_DYR = True           # preserve <case>.dyr in the result set
-KEEP_INITIALISED_SAV = True      # preserve <case>_initialised.sav in the result set
-PSSE_OUTPUT_MODE = "console"     # console | files | quiet
-VERBOSE_RUN_STATUS = True
+if RUN_STUDIES:
+    slack_bus_num = 331182
+    MODEL_DIR = r"""C:\Grid\WorkFolder\Heywood work folder\open test\psse model"""
+    plotter = HbessPssePlotter(pre_process_fn=pre_process_dataframe)
+    RESULTS_DIR = os.path.join(
+        r"""C:\Grid\WorkFolder\Heywood work folder\open test""",
+        f"{SAV_VERSION}_sav_{DYR_VERSION}_dyr",
+        now_str(),
+    )
+    if not os.path.exists(RESULTS_DIR):
+        os.makedirs(RESULTS_DIR)
 
-# Dispatch every unique initial P/Q/V/grid condition once, save a solved SAV,
-# then reuse it for all matching dynamic scenarios. The cache is fingerprinted
-# against the source SAV, definitions, config and project hooks.
-USE_DISPATCH_CACHE = True
-REBUILD_DISPATCH_CACHE = False
-VERIFY_DISPATCH_CACHE_HASHES = False
-DISPATCH_CACHE_DIR = os.path.join(RESULTS_ROOT, "_dispatch_cache", SAV_VERSION)
+    #Filtering spec
+    specification = load_specs_from_multiple_xlsx(
+        [XLSX_PATH_CSR, XLSX_PATH_DMAT, XLSX_PATH_DMAT_CRG, XLSX_PATH_DMAT_FLATRUN],
+        sheet_names=[
+            SHEETS_TO_PROCESS_CSR,
+            SHEETS_TO_PROCESS_DMAT,
+            SHEETS_TO_PROCESS_DMAT_CRG,
+            SHEETS_TO_PROCESS_FLATRUN,
+        ],
+    )
+    spec = get_vslacks(specification, MODEL_DIR, slack_bus_num)
+    if "Vslack_pu_psse" in spec.columns:
+        spec_non_vslack = specification[
+            ~specification["Vslack_pu_psse"].astype(str).str.contains(r"\$VSLACK")
+        ]
+    else:
+        spec_non_vslack = specification
+    spec = pd.concat([spec, spec_non_vslack], ignore_index=True)
+    spec = spec[spec["PSSE"] == True]
+    # print(spec["Vslack_pu_psse"])
+    # spec_vslack_df = pd.DataFrame(spec, columns=["Vslack_pu_psse"])
+    # spec_vslack_df.to_csv("spec.csv")
+    # sys.exit()
 
-# Add project-specific columns here when before_dispatch/after_dispatch uses
-# them (for example inverter count, temperature, tap ratio or control mode).
-# Likely inverter-count/temperature/tap/control-mode columns are also detected
-# automatically when present in the selected SPEC.
-DISPATCH_KEY_COLUMNS = []
-AUTO_DISPATCH_KEY_COLUMNS = True
+    # spec = spec[spec["Test No"].isin([10,11,12,13,14,15,16,17,18])]
+    # spec = spec[spec["Test No"] <= 12]
+    # spec = spec[spec["Subtest No"] == 5]
+    # spec = spec[spec["Batch"] == 2]
 
-# quiet | cases | commands. "commands" shows SPEC, SAV loading, dynamic time
-# advances and every compiled fault/model/TOV command. Use ["*"] below to
-# print every populated SPEC field instead of this concise review list.
-RUN_PROGRESS_LEVEL = "commands"
-PRINT_CASE_SPEC = True
-SPEC_FIELDS_TO_PRINT = [
-    "Spec_Source",
-    "Sheet_Name",
-    "Spec_Row",
-    "Category",
-    "Test No",
-    "Subtest No",
-    "File_Name",
-    "Ppoc_MW_sig",
-    "Qpoc_MVAr_init",
-    "Vpoc_pu_sig",
-    "Grid_SCR",
-    "Grid_FL_MVA_sig",
-    "Grid_X2R_sig",
-    "Is_Infinite",
-    "Post_Init_Duration_s",
-    "Steps_per_write",
-]
-
-
-def build_study_spec():
-    """Load selected sheets and retain the original Vslack workflow."""
-    specification = load_spec_options(SPEC_OPTIONS)
-
-    vslack_spec = get_vslacks(specification, MODEL_DIR, SLACK_BUS_NUM)
-    specification.update(vslack_spec)
-    return specification.reset_index(drop=True)
-
-
-# -----------------------------------------------------------------------------
-# RUN ANALYSIS
-# -----------------------------------------------------------------------------
 
 RUN_ANALYSIS = False
+if RUN_ANALYSIS:
+    if RUN_STUDIES:
+        CSR_INPUTS_DIR = RESULTS_DIR
+    else:
+        CSR_INPUTS_DIR = r"""D:\results\heywoodbess\psse\EXISTING_RUN"""
+    analysis_extension = ".out"
+    ANALYSIS_OUTPUTS_DIR = os.path.join(CSR_INPUTS_DIR, f"_analysis_{NOW_STR}")
 
-if RUN_STUDIES:
-    DEFAULT_ANALYSIS_INPUTS_DIR = RESULTS_DIR
-else:
-    DEFAULT_ANALYSIS_INPUTS_DIR = r"D:\results\heywoodbess\psse\EXISTING_RUN"
+    DPDF_CHARACTERISTIC_POINTS = [(-6, 570), (-1.715, 570), (-0.865, 285), (-0.1, 11.4), (-0.015, 0), (0.015, 0), (0.1, -11.4), (0.865, -285), (1.715, -570), (6, -570)]
+    VDROOP_CHARACTERISTIC_POINTS = [(-0.1, 112.575), (-0.04, 112.575), (-0.04, 112.575), (0.04, -112.575), (0.04, -112.575), (0.1, -112.575)]
 
-CSR_INPUTS_DIR = DEFAULT_ANALYSIS_INPUTS_DIR
-ANALYSIS_EXTENSION = ".out"
-ANALYSIS_OUTPUTS_DIR = os.path.join(CSR_INPUTS_DIR, "_analysis_{}".format(NOW_STR))
-
-DPDF_CHARACTERISTIC_POINTS = [
-    (-6, 570),
-    (-1.715, 570),
-    (-0.865, 285),
-    (-0.1, 11.4),
-    (-0.015, 0),
-    (0.015, 0),
-    (0.1, -11.4),
-    (0.865, -285),
-    (1.715, -570),
-    (6, -570),
-]
-
-VDROOP_CHARACTERISTIC_POINTS = [
-    (-0.1, 112.575),
-    (-0.04, 112.575),
-    (0.04, -112.575),
-    (0.1, -112.575),
-]
-
-HVRT_THRESHOLDS = [
-    {"value": 1.15, "withstand_sec": 60, "colour": "yellow"},
-    {"value": 1.25, "withstand_sec": 1, "colour": "orange"},
-]
-
-LVRT_THRESHOLDS = [
-    {"value": 0.8, "withstand_sec": 21, "colour": "yellow"},
-    {"value": 0.4, "withstand_sec": 21, "colour": "red"},
-]
+    HVRT_THRESHOLDS = [
+            {
+                "value": 1.15,
+                "withstand_sec": 60,
+                "colour": "yellow",
+            },
+            {
+                "value": 1.25,
+                "withstand_sec": 1,
+                "colour": "orange",
+            },
+        ]
+    LVRT_THRESHOLDS = [
+            {
+                "value": 0.8,
+                "withstand_sec": 21,
+                "colour": "yellow",
+            },
+            {
+                "value": 0.4,
+                "withstand_sec": 21,
+                "colour": "red",
+            },
+        ]
 
 
-# -----------------------------------------------------------------------------
-# REPLOT PSS/E STUDIES
-# -----------------------------------------------------------------------------
-
+#Replot PSSE studies
 REPLOT_PSSE = False
-REPLOT_EXTENSION = ".out"
-PLOT_INPUTS_DIR = r"D:\results\heywoodbess\psse\EXISTING_RUN"
-PLOT_OUT_DIR = os.path.join(PLOT_INPUTS_DIR, "replots")
+if REPLOT_PSSE:
+    extension_replot = ".out"
+    replotter = HbessPssePlotter(pre_process_fn=pre_process_dataframe)
+    PLOT_INPUTS_DIR = r"""C:\Grid\chen\cg\results\psse\v1-1-0_sav_v1-1-0_dyr\20250326_1234_16856156"""
+    PLOT_OUT_PATH = os.path.join(r"""C:\Grid\chen\cg\results\psse\replots""")
 
 
-# -----------------------------------------------------------------------------
-# GENERATE APPENDICES
-# -----------------------------------------------------------------------------
-
+#Generate appendices for chosen clauses
 CREATE_APPENDIX = False
+if CREATE_APPENDIX:
+    PLOT_RESULTS_DIRS = [RESULTS_DIR]
+    OUTPUT_DIR_DMAT = os.path.join(RESULTS_DIR)
+    OUTPUT_DIR_CSR = os.path.join(RESULTS_DIR)
+    SHEETS_TO_PROCESS_COMBINED = [SHEETS_TO_PROCESS_CSR, SHEETS_TO_PROCESS_DMAT, SHEETS_TO_PROCESS_DMAT_CRG]
+    XLSX_PATHS = [XLSX_PATH_CSR, XLSX_PATH_DMAT, XLSX_PATH_DMAT_CRG]
+    issued_date = "20th July 2026"
+    revision_no = "DRAFT"
+    overwrite_title = False
+    hard_title = "Appendix"
+    report_no = "004"
+    PSSE_REPORT = True
+    create_discharge_appendices = True
+    create_charge_appendices = True
 
-PLOT_RESULTS_DIRS = [RESULTS_DIR]
-OUTPUT_DIR_DMAT = RESULTS_DIR
-OUTPUT_DIR_CSR = RESULTS_DIR
-XLSX_PATHS, SHEETS_TO_PROCESS_COMBINED = spec_source_lists(SPEC_OPTIONS, "appendix")
-ISSUED_DATE = "20th July 2026"
-REVISION_NO = "DRAFT"
-OVERWRITE_TITLE = False
-HARD_TITLE = "Appendix"
-REPORT_NO = "004"
-PSSE_REPORT = True
-CREATE_DISCHARGE_APPENDICES = True
-CREATE_CHARGE_APPENDICES = True
+    if not os.path.exists(OUTPUT_DIR_DMAT):
+        os.makedirs(OUTPUT_DIR_DMAT)
+    if not os.path.exists(OUTPUT_DIR_CSR):
+        os.makedirs(OUTPUT_DIR_CSR)
+    print(OUTPUT_DIR_DMAT)
 
 
-# -----------------------------------------------------------------------------
-# CREATE REPORT TABLES
-# -----------------------------------------------------------------------------
-
+#Create report tables for chosen clauses
 CREATE_REPORT_TABLES = False
+if CREATE_REPORT_TABLES:
+    SHEETS_TO_PROCESS_TABLES = [SHEETS_TO_PROCESS_CSR, SHEETS_TO_PROCESS_DMAT, SHEETS_TO_PROCESS_DMAT_CRG]
+    SPEC_PATHS_TABLES = [XLSX_PATH_CSR, XLSX_PATH_DMAT, XLSX_PATH_DMAT_CRG]
+    TABLE_DIR = str(PROJECT_ROOT / "002 report tables")
+    COLMAP_PATHS = [os.path.join(TABLE_DIR, "column_mapping_DMAT.csv"), os.path.join(TABLE_DIR, "column_mapping_CSR.csv")]
+    OUTPUT_DIRS_TABLE = [
+        r"""D:\results\heywoodbess\report_tables\tableoutputsDMAT - psse""",
+        r"""D:\results\heywoodbess\report_tables\tableoutputsCSR - psse""",
+    ]
+    for output_dirs in OUTPUT_DIRS_TABLE:
+        if not os.path.exists(output_dirs):
+            os.makedirs(output_dirs)
 
-SPEC_PATHS_TABLES, SHEETS_TO_PROCESS_TABLES = spec_source_lists(SPEC_OPTIONS, "tables")
-TABLE_DIR = str(PROJECT_ROOT / "002 report tables")
-COLMAP_PATHS = [
-    os.path.join(TABLE_DIR, "column_mapping_DMAT.csv"),
-    os.path.join(TABLE_DIR, "column_mapping_CSR.csv"),
-]
-OUTPUT_DIRS_TABLE = [
-    os.path.join(RESULTS_ROOT, "report_tables", "DMAT"),
-    os.path.join(RESULTS_ROOT, "report_tables", "CSR"),
-]
 
 
-# -----------------------------------------------------------------------------
-# MAIN
-# -----------------------------------------------------------------------------
 
+#-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("Native hbess_open package: {}".format(Path(hbess_open.__file__).resolve()))
-    print("Native psse_open engine: {}".format(Path(psse_open.__file__).resolve()))
-    if SRC_DIR not in Path(hbess_open.__file__).resolve().parents:
-        raise RuntimeError("hbess_open was not imported from this project's src directory")
 
     if RUN_STUDIES:
-        os.makedirs(RESULTS_DIR, exist_ok=True)
-        spec = build_study_spec()
-        plotter = HbessPssePlotter(pre_process_fn=pre_process_dataframe)
         run_psse_studies(
             spec=spec,
             plotter=plotter,
             MODEL_DIR=MODEL_DIR,
-            RESULTS_DIR=RESULTS_DIR,
-            plot_results=PLOT_RESULTS,
-            keep_csv_results=KEEP_CSV_RESULTS,
-            save_run_manifests=SAVE_RUN_MANIFESTS,
-            keep_runtime_files=KEEP_RUNTIME_FILES,
-            keep_psse_logs=KEEP_PSSE_LOGS,
-            keep_result_dyr=KEEP_RESULT_DYR,
-            keep_initialised_sav=KEEP_INITIALISED_SAV,
-            psse_output_mode=PSSE_OUTPUT_MODE,
-            use_dispatch_cache=USE_DISPATCH_CACHE,
-            dispatch_cache_dir=DISPATCH_CACHE_DIR,
-            rebuild_dispatch_cache=REBUILD_DISPATCH_CACHE,
-            dispatch_key_columns=DISPATCH_KEY_COLUMNS,
-            auto_dispatch_key_columns=AUTO_DISPATCH_KEY_COLUMNS,
-            verify_dispatch_cache_hashes=VERIFY_DISPATCH_CACHE_HASHES,
-            progress_level=RUN_PROGRESS_LEVEL,
-            print_case_spec=PRINT_CASE_SPEC,
-            spec_fields_to_print=SPEC_FIELDS_TO_PRINT,
-            verbose=VERBOSE_RUN_STATUS,
+            RESULTS_DIR=RESULTS_DIR
         )
+
 
     if RUN_ANALYSIS:
         run_analysis_psse(
             x86=x86,
-            extension=ANALYSIS_EXTENSION,
+            extension=analysis_extension,
             ANALYSIS_TO_RUN=ANALYSIS_TO_RUN,
             DPDF_CHARACTERISTIC_POINTS=DPDF_CHARACTERISTIC_POINTS,
             VDROOP_CHARACTERISTIC_POINTS=VDROOP_CHARACTERISTIC_POINTS,
@@ -404,41 +290,39 @@ if __name__ == "__main__":
             OUTPUTS_DIR=ANALYSIS_OUTPUTS_DIR,
         )
 
+
     if REPLOT_PSSE:
-        replotter = HbessPssePlotter(pre_process_fn=pre_process_dataframe)
         replot_psse(
-            extension=REPLOT_EXTENSION,
+            extension=extension_replot,
             replotter=replotter,
             PLOT_INPUTS_DIR=PLOT_INPUTS_DIR,
-            PLOT_OUT_DIR=PLOT_OUT_DIR,
-            x86=x86,
-        )
+            PLOT_OUT_DIR=PLOT_OUT_PATH,
+            x86=x86)
+
 
     if CREATE_APPENDIX:
         create_appendix_heywoodbess(
-            PLOT_RESULTS_DIRS=PLOT_RESULTS_DIRS,
-            OUTPUT_DIR_DMAT=OUTPUT_DIR_DMAT,
-            OUTPUT_DIR_CSR=OUTPUT_DIR_CSR,
-            XLSX_PATHS=XLSX_PATHS,
-            SHEETS_TO_PROCESS=SHEETS_TO_PROCESS_COMBINED,
-            NOW_STR=NOW_STR,
-            issued_date=ISSUED_DATE,
-            revision_no=REVISION_NO,
-            x86=PSSE_REPORT,
-            overwrite_title=OVERWRITE_TITLE,
-            hard_title=HARD_TITLE,
-            report_no=REPORT_NO,
-            create_discharge_appendices=CREATE_DISCHARGE_APPENDICES,
-            create_charge_appendices=CREATE_CHARGE_APPENDICES,
-        )
+                PLOT_RESULTS_DIRS=PLOT_RESULTS_DIRS,
+                OUTPUT_DIR_DMAT=OUTPUT_DIR_DMAT,
+                OUTPUT_DIR_CSR=OUTPUT_DIR_CSR,
+                XLSX_PATHS=XLSX_PATHS,
+                SHEETS_TO_PROCESS=SHEETS_TO_PROCESS_COMBINED,
+                NOW_STR=NOW_STR,
+                issued_date=issued_date,
+                revision_no=revision_no,
+                x86=PSSE_REPORT,
+                overwrite_title=overwrite_title,
+                hard_title=hard_title,
+                report_no=report_no,
+                create_discharge_appendices=create_discharge_appendices,
+                create_charge_appendices=create_charge_appendices)
+
+
 
     if CREATE_REPORT_TABLES:
-        for output_dir in OUTPUT_DIRS_TABLE:
-            os.makedirs(output_dir, exist_ok=True)
         create_report_table_CSR_DMAT(
             COLMAP_PATHS=COLMAP_PATHS,
             SPEC_PATHS=SPEC_PATHS_TABLES,
             SHEETS_TO_PROCESS=SHEETS_TO_PROCESS_TABLES,
             OUTPUT_DIRS=OUTPUT_DIRS_TABLE,
-            x86=x86,
-        )
+            x86=x86)

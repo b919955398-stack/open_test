@@ -60,6 +60,8 @@ class EngineRuntimeTests(unittest.TestCase):
                 "continue_on_error": True,
                 "keep_runtime_files": False,
                 "keep_scenario_json": True,
+                "resume_completed_results": True,
+                "resume_require_plots": True,
                 "files": {"sav": "base.sav", "dyr": "base.dyr", "copy_globs": []},
                 "system": {"poc_bus": 1, "infinite_bus": 2, "grid_branch": {"from_bus": 1, "to_bus": 2, "id": "1"}, "infinite_machine": {"id": "1"}},
                 "dynamics": {"frequency_hz": 50.0},
@@ -83,6 +85,9 @@ class EngineRuntimeTests(unittest.TestCase):
 
             def callback(result, plan, number, total):
                 order.append("callback:" + result["file_name"])
+                if result.get("resume_status") == "hit":
+                    result["plot_status"] = "reused"
+                    return
                 result_dir = Path(result["out"]).parent
                 png_path = result_dir / (result["file_name"] + ".png")
                 pdf_path = result_dir / (result["file_name"] + ".pdf")
@@ -117,6 +122,21 @@ class EngineRuntimeTests(unittest.TestCase):
                 )
             self.assertFalse((output / "_work").exists())
             self.assertFalse((output / "_runtime").exists())
+
+            first_run_order = list(order)
+            with patch("psse_open.engine.out_to_csv") as convert_again:
+                resumed = engine.run(plans, result_callback=callback)
+            self.assertEqual(
+                order[len(first_run_order):],
+                ["callback:case_1", "callback:case_2"],
+            )
+            convert_again.assert_not_called()
+            self.assertEqual(
+                [item["resume_status"] for item in resumed], ["hit", "hit"]
+            )
+            self.assertEqual(
+                [item["plot_status"] for item in resumed], ["reused", "reused"]
+            )
 
 
 if __name__ == "__main__":

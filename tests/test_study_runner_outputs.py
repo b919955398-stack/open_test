@@ -1,4 +1,5 @@
 import tempfile
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,8 +49,38 @@ class _FilePlotter:
         Path(pdf_path).write_bytes(b"pdf")
 
 
+class _FlatTovEngine:
+    def __init__(self, config):
+        self.output_dir = Path(config.data["output_dir"])
+
+    def run(self, plans, result_callback=None):
+        plan = list(plans)[0]
+        name = plan.scenario.file_name
+        result_dir = self.output_dir / plan.scenario.category
+        result_dir.mkdir(parents=True, exist_ok=True)
+        out_path = result_dir / (name + ".out")
+        csv_path = result_dir / (name + ".csv")
+        out_path.write_bytes(b"out")
+        pd.DataFrame({
+            "time": [0.0, 0.5, 0.93],
+            "V_POC_PU": [1.0, 1.0, 1.0],
+        }).to_csv(csv_path, index=False)
+        # These represent old plots from an earlier fingerprint and must not
+        # survive a newly detected invalid TOV result.
+        (result_dir / (name + ".png")).write_bytes(b"stale png")
+        (result_dir / (name + ".pdf")).write_bytes(b"stale pdf")
+        result = {
+            "file_name": name,
+            "status": "completed",
+            "out": str(out_path),
+            "csv": str(csv_path),
+        }
+        result_callback(result, plan, 1, 1)
+        return [result]
+
+
 class StudyRunnerOutputTests(unittest.TestCase):
-    def test_each_case_is_plotted_immediately_and_temporary_csv_is_removed(self):
+    def test_each_case_is_eventually_plotted_and_temporary_csv_is_removed(self):
         spec = pd.DataFrame([
             {"File_Name": "case_1", "Category": "CSR", "PSSE": True, "Grid_SCR": 3.0,
              "Grid_X2R_sig": 5.0, "Grid_FL_MVA_sig": 900.0, "Post_Init_Duration_s": 1.0},
@@ -67,13 +98,51 @@ class StudyRunnerOutputTests(unittest.TestCase):
                 save_run_manifests=False, verbose=False,
             )
             category = Path(results_dir) / "CSR"
-            self.assertEqual(_ImmediateEngine.plotted_before_next_case, [True])
+            self.assertEqual(len(_ImmediateEngine.plotted_before_next_case), 1)
             self.assertTrue((category / "case_1.png").exists())
             self.assertTrue((category / "case_1.pdf").exists())
             self.assertFalse((category / "case_1.csv").exists())
             self.assertNotIn("csv", results[0])
+            self.assertEqual(results[0]["plot_status"], "completed")
             self.assertFalse((Path(results_dir) / "running_spec.csv").exists())
             self.assertFalse((Path(results_dir) / "study_plan.json").exists())
+
+    def test_flat_tov_preserves_diagnostic_csv_and_removes_stale_plots(self):
+        spec = pd.DataFrame([{
+            "File_Name": "flat_tov",
+            "Category": "329_TOV",
+            "PSSE": True,
+            "Grid_SCR": 3.0,
+            "Grid_X2R_sig": 5.0,
+            "Grid_FL_MVA_sig": 900.0,
+            "U_Ov": 1.2,
+            "Post_Init_Duration_s": 1.0,
+        }])
+        with tempfile.TemporaryDirectory() as results_dir, \
+                patch("hbess_open.studyrunners.psse_study_runner._load_config", return_value=_Config()), \
+                patch("hbess_open.studyrunners.psse_study_runner.StudyEngine", _FlatTovEngine), \
+                patch(
+                    "hbess_open.studyrunners.psse_study_runner.build_plan",
+                    side_effect=lambda scenario: SimpleNamespace(
+                        scenario=scenario, events=[], playback=[]
+                    ),
+                ):
+            with self.assertRaisesRegex(RuntimeError, "flat/invalid"):
+                run_psse_studies(
+                    spec,
+                    _FilePlotter(),
+                    "model",
+                    results_dir,
+                    plot_in_background=False,
+                    verbose=False,
+                )
+            category = Path(results_dir) / "329_TOV"
+            self.assertTrue((category / "flat_tov.csv").is_file())
+            self.assertFalse((category / "flat_tov.png").exists())
+            self.assertFalse((category / "flat_tov.pdf").exists())
+            status = json.loads((Path(results_dir) / "run_status.json").read_text())
+            self.assertEqual(status[0]["validation_status"], "failed")
+            self.assertEqual(status[0]["plot_status"], "skipped_invalid_tov")
 
 
 if __name__ == "__main__":
