@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,10 @@ class _FakePsspy(object):
     def getdefaultchar(self):
         return ""
 
+    def _record(self, name, *args):
+        self.calls.append((name, args))
+        return 0
+
     def _output(self, name, selector, target, options):
         self.calls.append((name, selector, target, options))
         return 0
@@ -34,6 +39,30 @@ class _FakePsspy(object):
 
     def prompt_output(self, selector, target, options):
         return self._output("prompt", selector, target, options)
+
+    def psseinit(self, buses):
+        return self._record("psseinit", buses)
+
+    def case(self, path):
+        return self._record("case", path)
+
+    def fnsl(self, options):
+        return self._record("fnsl", options)
+
+    def pssehalt_2(self):
+        return self._record("halt")
+
+    def save(self, path):
+        return self._record("save", path)
+
+
+class _DynamicFakePsspy(_FakePsspy):
+    def __getattr__(self, name):
+        def method(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+            return 0
+
+        return method
 
 
 class NativePsseOutputTests(unittest.TestCase):
@@ -68,6 +97,70 @@ class NativePsseOutputTests(unittest.TestCase):
         backend = PsseBackend(fake, config)
         self.assertEqual(backend._configure_native_output(Path("case")), "files")
         self.assertTrue(all(call[1] == 2 for call in fake.calls))
+
+    def test_halt_is_only_sent_after_successful_psse_initialization(self):
+        fake = _FakePsspy()
+        config = ProjectConfig("test.json", {
+            "system": {},
+            "dynamics": {},
+            "psse": {"max_buses": 1000},
+            "load_flow": {"solve_repetitions": 1},
+            "psse_output_mode": "quiet",
+        })
+        backend = PsseBackend(fake, config)
+
+        backend.halt()
+        self.assertEqual([call[0] for call in fake.calls].count("halt"), 0)
+
+        backend.initialize(Path("base.sav"), Path("case"))
+        backend.halt()
+        backend.halt()
+        self.assertEqual([call[0] for call in fake.calls].count("halt"), 1)
+
+    def test_save_uses_plain_relative_name_when_target_is_in_current_directory(self):
+        fake = _FakePsspy()
+        config = ProjectConfig("test.json", {"system": {}, "dynamics": {}})
+        backend = PsseBackend(fake, config)
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory).resolve()
+            try:
+                os.chdir(str(runtime))
+                backend.save_case(runtime / "dispatch_abc_123_tmp.sav")
+            finally:
+                os.chdir(str(previous))
+        save_calls = [args for name, args in fake.calls if name == "save"]
+        self.assertEqual(save_calls, [("dispatch_abc_123_tmp.sav",)])
+
+    def test_initialised_sav_is_saved_with_short_name_before_strt(self):
+        fake = _DynamicFakePsspy()
+        config = ProjectConfig("test.json", {
+            "system": {},
+            "dynamics": {},
+            "channel_definition": {"bus_voltage_channels": []},
+        })
+        backend = PsseBackend(fake, config)
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory).resolve()
+            dyr_path = runtime / "base.dyr"
+            dyr_path.write_text("/\n", encoding="ascii")
+            try:
+                os.chdir(str(runtime))
+                backend.initialize_dynamics(
+                    runtime,
+                    dyr_path,
+                    runtime / "case.out",
+                    [],
+                    initialised_sav_path=runtime / "initialised_123_0001.sav",
+                )
+            finally:
+                os.chdir(str(previous))
+
+        call_names = [call[0] for call in fake.calls]
+        self.assertLess(call_names.index("save"), call_names.index("strt"))
+        save_calls = [call[1] for call in fake.calls if call[0] == "save"]
+        self.assertEqual(save_calls, [("initialised_123_0001.sav",)])
 
 
 if __name__ == "__main__":

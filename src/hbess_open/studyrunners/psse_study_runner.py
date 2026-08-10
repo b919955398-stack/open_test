@@ -118,6 +118,8 @@ def run_psse_studies(
     save_run_manifests: bool = False,
     keep_runtime_files: bool = False,
     keep_psse_logs: bool = False,
+    keep_result_dyr: bool = True,
+    keep_initialised_sav: bool = True,
     psse_output_mode: str = None,
     verbose: bool = True,
     use_dispatch_cache: bool = True,
@@ -132,7 +134,8 @@ def run_psse_studies(
 ):
     """Run and immediately plot each completed PSS/E scenario.
 
-    By default only OUT/JSON/PNG/PDF plus one root status file are retained.
+    By default each completed scenario retains the established Pallet-style
+    DYR/JSON/OUT/PDF/PNG/initialised-SAV result set plus one root status file.
     The CSV used by the plotter and the shared model runtime are temporary.
     """
     specification = spec.copy()
@@ -151,6 +154,8 @@ def run_psse_studies(
     config.data["result_layout"] = "pallet"
     config.data["keep_runtime_files"] = bool(keep_runtime_files)
     config.data["keep_psse_logs"] = bool(keep_psse_logs)
+    config.data["keep_result_dyr"] = bool(keep_result_dyr)
+    config.data["keep_initialised_sav"] = bool(keep_initialised_sav)
     if psse_output_mode in (None, ""):
         effective_psse_output_mode = "files" if keep_psse_logs else "quiet"
     else:

@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .grid import fault_impedance_ohm, impedance_from_fault_level, infinite_bus_voltage
 from .models import Event, PlaybackPoint, Scenario
+from .profiles import initial_signal_value
 
 
 class PsseError(RuntimeError):
@@ -25,6 +26,7 @@ class PsseBackend:
         self._s = psspy.getdefaultchar()
         self.current_fault_number = 1
         self.steps_per_write = int(config.section("dynamics").get("nplt", 0))
+        self._psse_initialized = False
 
     def _check(self, result, action: str):
         ierr = result[0] if isinstance(result, tuple) else result
@@ -81,14 +83,31 @@ class PsseBackend:
     def initialize(self, sav_path: Path, log_stem: Path, solve_load_flow: bool = True) -> None:
         buses = int(self.config.section("psse").get("max_buses", 200000))
         self._check(self.psspy.psseinit(buses), "psseinit")
+        self._psse_initialized = True
         self._configure_native_output(log_stem)
         self._check(self.psspy.case(str(sav_path)), "load SAV")
         if solve_load_flow:
             self.solve_load_flow()
 
-    def save_case(self, sav_path: Path) -> None:
-        Path(sav_path).parent.mkdir(parents=True, exist_ok=True)
-        self._check(self.psspy.save(str(sav_path)), "save dispatched SAV")
+    def save_case(self, sav_path: Path, action: str = "save dispatched SAV") -> None:
+        sav_path = Path(sav_path)
+        sav_path.parent.mkdir(parents=True, exist_ok=True)
+        current_directory = Path.cwd().resolve()
+        resolved_parent = sav_path.parent.resolve()
+        api_path = sav_path.name if resolved_parent == current_directory else str(sav_path)
+        try:
+            self._check(self.psspy.save(api_path), action)
+        except PsseError as exc:
+            raise PsseError(
+                "{} | api_path={!r} | output={!r} | cwd={!r} | parent_exists={} | path_length={}".format(
+                    exc,
+                    api_path,
+                    str(sav_path),
+                    str(current_directory),
+                    sav_path.parent.is_dir(),
+                    len(api_path),
+                )
+            )
 
     def solve_load_flow(self, repetitions: Optional[int] = None) -> None:
         count = int(repetitions or self.config.section("load_flow").get("solve_repetitions", 2))
@@ -132,9 +151,9 @@ class PsseBackend:
             base = scenario.get("Pbase_MW", self.config.section("bases").get("p_mw"))
             if scr in (None, "") or base in (None, ""):
                 raise PsseError("Scenario has neither Grid_FL_MVA_sig nor Grid_SCR + plant base")
-            fault_level = float(scr) * float(base)
-        xr = float(scenario.get("Grid_X2R_sig"))
-        r_pu, x_pu = impedance_from_fault_level(float(fault_level), xr)
+            fault_level = initial_signal_value(scr) * initial_signal_value(base)
+        xr = initial_signal_value(scenario.get("Grid_X2R_sig"))
+        r_pu, x_pu = impedance_from_fault_level(initial_signal_value(fault_level), xr)
         self.set_branch_impedance(self.branch("grid"), r_pu, x_pu)
         return r_pu, x_pu
 
@@ -142,11 +161,11 @@ class PsseBackend:
         bases = self.config.section("bases")
         p = scenario.get("Ppoc_MW_sig")
         if p in (None, ""):
-            p = float(scenario.get("Ppoc_pu", 0.0)) * float(bases["p_mw"])
+            p = initial_signal_value(scenario.get("Ppoc_pu"), 0.0) * float(bases["p_mw"])
         q = scenario.get("Qpoc_MVAr_init")
         if q in (None, ""):
-            q = float(scenario.get("Qpoc_pu", 0.0)) * float(bases.get("q_mvar", bases["p_mw"]))
-        return float(p), float(q)
+            q = initial_signal_value(scenario.get("Qpoc_pu"), 0.0) * float(bases.get("q_mvar", bases["p_mw"]))
+        return initial_signal_value(p), initial_signal_value(q)
 
     def dispatch(self, scenario: Scenario, r_pu: float, x_pu: float) -> None:
         generators = self.system.get("generators", [])
@@ -157,7 +176,10 @@ class PsseBackend:
         poc = int(measurement["from_bus"])
         infinite = int(measurement["to_bus"])
         ckt = str(measurement.get("id", "1"))
-        v_poc = float(scenario.get("Vpoc_pu_sig", self.config.section("bases").get("normal_v_pu", 1.0)))
+        v_poc = initial_signal_value(
+            scenario.get("Vpoc_pu_sig"),
+            self.config.section("bases").get("normal_v_pu", 1.0),
+        )
 
         # Match the transparent calculation in the supplied open DMAT script:
         # solve the required infinite-bus schedule first, then compensate plant
@@ -251,7 +273,14 @@ class PsseBackend:
             stream.write(record)
         return plb_path, dyr_path
 
-    def initialize_dynamics(self, work_dir: Path, dyr_path: Path, out_path: Path, playback: List[PlaybackPoint]) -> None:
+    def initialize_dynamics(
+        self,
+        work_dir: Path,
+        dyr_path: Path,
+        out_path: Path,
+        playback: List[PlaybackPoint],
+        initialised_sav_path: Optional[Path] = None,
+    ) -> None:
         self._check(self.psspy.cong(0), "convert generators")
         for stage in (1, 2, 3):
             self._check(self.psspy.conl(0, 1, stage, [0, 0], [100.0, 0.0, 0.0, 100.0]), "convert loads stage {}".format(stage))
@@ -284,6 +313,12 @@ class PsseBackend:
         netfrq = 1 if bool(dynamics.get("frequency_dependence", False)) else 0
         self._check(self.psspy.set_netfrq(netfrq), "set network frequency dependence")
         self.add_channels()
+        if initialised_sav_path is not None:
+            # Match the established result contract: preserve the converted,
+            # dynamically configured case after DYR/channel setup and
+            # immediately before STRT. The caller supplies a short runtime
+            # filename and publishes it under the full scenario name.
+            self.save_case(initialised_sav_path, action="save initialised SAV")
         self._check(self.psspy.strt(outfile=str(out_path)), "start dynamics")
         status = self.psspy.okstrt()
         if status not in (0,):
@@ -542,7 +577,11 @@ class PsseBackend:
         )
 
     def halt(self) -> None:
+        if not self._psse_initialized:
+            return
         try:
             self.psspy.pssehalt_2()
         except Exception:
             pass
+        finally:
+            self._psse_initialized = False

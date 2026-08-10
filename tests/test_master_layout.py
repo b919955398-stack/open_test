@@ -21,6 +21,8 @@ class MasterLayoutTests(unittest.TestCase):
             "KEEP_CSV_RESULTS",
             "SAVE_RUN_MANIFESTS",
             "KEEP_RUNTIME_FILES",
+            "KEEP_RESULT_DYR",
+            "KEEP_INITIALISED_SAV",
             "USE_DISPATCH_CACHE",
             "REBUILD_DISPATCH_CACHE",
             "DISPATCH_CACHE_DIR",

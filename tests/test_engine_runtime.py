@@ -27,7 +27,11 @@ class _Backend:
     def make_grid_infinite(self):
         pass
 
-    def initialize_dynamics(self, work_dir, dyr_path, out_path, playback):
+    def initialize_dynamics(
+        self, work_dir, dyr_path, out_path, playback, initialised_sav_path=None
+    ):
+        if initialised_sav_path is not None:
+            Path(initialised_sav_path).write_bytes(b"initialised sav")
         Path(out_path).write_bytes(b"out")
 
     def apply_event(self, event, scenario):
@@ -79,7 +83,16 @@ class EngineRuntimeTests(unittest.TestCase):
 
             def callback(result, plan, number, total):
                 order.append("callback:" + result["file_name"])
-                result["plot_status"] = "completed"
+                result_dir = Path(result["out"]).parent
+                png_path = result_dir / (result["file_name"] + ".png")
+                pdf_path = result_dir / (result["file_name"] + ".pdf")
+                png_path.write_bytes(b"png")
+                pdf_path.write_bytes(b"pdf")
+                result.update(
+                    plot_status="completed",
+                    png=str(png_path),
+                    pdf=str(pdf_path),
+                )
 
             with patch("psse_open.engine.out_to_csv", side_effect=fake_out_to_csv), \
                     patch.object(engine, "_copy_inputs", wraps=engine._copy_inputs) as stage:
@@ -91,6 +104,17 @@ class EngineRuntimeTests(unittest.TestCase):
                 "start:case_2", "callback:case_2",
             ])
             self.assertEqual([item["plot_status"] for item in results], ["completed", "completed"])
+            for case_name in ("case_1", "case_2"):
+                case_dir = output / "CSR"
+                self.assertTrue((case_dir / (case_name + ".json")).is_file())
+                self.assertEqual((case_dir / (case_name + ".out")).read_bytes(), b"out")
+                self.assertEqual((case_dir / (case_name + ".dyr")).read_bytes(), b"dyr")
+                self.assertEqual((case_dir / (case_name + ".png")).read_bytes(), b"png")
+                self.assertEqual((case_dir / (case_name + ".pdf")).read_bytes(), b"pdf")
+                self.assertEqual(
+                    (case_dir / (case_name + "_initialised.sav")).read_bytes(),
+                    b"initialised sav",
+                )
             self.assertFalse((output / "_work").exists())
             self.assertFalse((output / "_runtime").exists())
 
