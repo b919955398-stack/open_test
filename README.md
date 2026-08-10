@@ -164,6 +164,8 @@ PSS/E master 现在完全沿用公司版的结构：四组 sheet 列表传给 `l
 
 每个成功案例会在 `RESULTS_DIR/<Category>/` 下形成同名 DYR、JSON、OUT、PNG、PDF 和 `_initialised.sav` 文件组。`_initialised.sav` 在 DYR、动态参数和 channels 装载完成后、`STRT` 前保存；它与内部 `_dispatch_cache` 的静态 dispatched SAV 分开。终端会显示 SPEC、Dispatch Key、时间推进、command、`STUDY OK/FAILED` 与 `PLOT OK/FAILED`；完整路径、cache 状态、分阶段耗时和错误写入 `run_status.json`。若缺少 chandef channel，错误会直接给出缺失 channel 名，而不是静默跳过。
 
+运行器只报告执行和绘图错误，不自动判断波形在电气上是否正确。即使 TOV 曲线为平线，也会照常生成 PNG/PDF，由工程师人工审核结果。
+
 `MODEL_DIR` 应包含 SAV、DYR、`.savdef`、`.initdef`、`.chandef` 以及 OEM 模型所需 DLL/TXT/CFG。存在多份版本时，将 `open_psse_config.example.json` 复制为该目录下的 `open_psse_config.json` 并指定文件名。
 
 PSS/E 34 的标准目录会自动检测：

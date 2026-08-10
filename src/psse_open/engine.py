@@ -777,8 +777,7 @@ class StudyEngine:
                     }:
                         metadata_status = (
                             "failed"
-                            if result.get("plot_status")
-                            in {"failed", "skipped_invalid_tov"}
+                            if result.get("plot_status") == "failed"
                             else "study_completed"
                         )
                     else:

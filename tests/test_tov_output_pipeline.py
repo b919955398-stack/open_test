@@ -1,11 +1,8 @@
 import unittest
-from types import SimpleNamespace
 
 import pandas as pd
 
 from hbess_open.open_psse.plot_adapter import downsample_dataframe_for_plot
-from hbess_open.studyrunners.psse_study_runner import _validate_tov_dataframe
-from psse_open.models import Scenario
 from psse_open.output import out_to_dataframe
 
 
@@ -30,26 +27,6 @@ class _DynTools:
 
 
 class TovOutputPipelineTests(unittest.TestCase):
-    @staticmethod
-    def _plan():
-        scenario = Scenario("5255_TOV", 2, "case", True, {
-            "Category": "5255_TOV",
-            "U_Ov": 1.2,
-            "Post_Init_Duration_s": 2.0,
-        })
-        return SimpleNamespace(scenario=scenario)
-
-    def test_flat_tov_poc_voltage_is_rejected(self):
-        frame = pd.DataFrame({"time": [0.0, 0.5, 1.0], "V_POC_PU": [1.0, 1.0, 1.0]})
-        with self.assertRaisesRegex(RuntimeError, "is flat"):
-            _validate_tov_dataframe(frame, self._plan())
-
-    def test_nonflat_tov_poc_voltage_passes_with_range_metadata(self):
-        frame = pd.DataFrame({"time": [0.0, 0.5, 1.0], "V_POC_PU": [1.0, 1.19, 1.01]})
-        result = _validate_tov_dataframe(frame, self._plan())
-        self.assertEqual(result["status"], "passed")
-        self.assertAlmostEqual(result["span_pu"], 0.19)
-
     def test_out_is_decoded_directly_to_memory_with_unit_conversions(self):
         frame = out_to_dataframe("case.out", _DynTools(), nominal_frequency_hz=50.0)
         self.assertEqual(list(frame.columns), ["time", "POC_FREQUENCY", "INV_PELEC", "V_POC_PU"])

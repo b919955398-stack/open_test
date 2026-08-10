@@ -123,62 +123,6 @@ def _scenario_from_row(index: Any, row: pd.Series) -> Scenario:
     )
 
 
-def _is_tov_plan(plan) -> bool:
-    scenario = plan.scenario
-    labels = "{} {}".format(scenario.sheet, scenario.category).upper()
-    return (
-        "TOV" in labels
-        or "TEMPORARY OVER" in labels
-        or scenario.get("U_Ov") not in (None, "")
-        or scenario.get("TOV_Timing_Signal_sig") not in (None, "")
-    )
-
-
-def _validate_tov_dataframe(dataframe: pd.DataFrame, plan) -> dict:
-    """Reject the silent-success mode where a TOV result is completely flat."""
-    candidates = (
-        "V_POC_PU",
-        "POC_VOLTAGE",
-        "Vpoc_pu",
-        "VPOC_PU",
-    )
-    column = next((name for name in candidates if name in dataframe.columns), None)
-    if column is None:
-        matching = [
-            name
-            for name in dataframe.columns
-            if "POC" in str(name).upper() and "V" in str(name).upper()
-        ]
-        raise RuntimeError(
-            "TOV validation cannot find the POC voltage channel. Available POC-like "
-            "channels: {}".format(", ".join(map(str, matching)) or "<none>")
-        )
-    voltage = pd.to_numeric(dataframe[column], errors="coerce").dropna()
-    if voltage.empty:
-        raise RuntimeError("TOV POC voltage channel {!r} contains no numeric data".format(column))
-    minimum = float(voltage.min())
-    maximum = float(voltage.max())
-    span = maximum - minimum
-    target = plan.scenario.get("U_Ov")
-    result = {
-        "status": "passed",
-        "channel": column,
-        "minimum_pu": minimum,
-        "maximum_pu": maximum,
-        "span_pu": span,
-        "target_pu": None if target in (None, "") else float(target),
-    }
-    if span <= 1.0e-3:
-        raise RuntimeError(
-            "TOV disturbance did not reach the POC: channel {} is flat "
-            "(min={:.6g}, max={:.6g}, span={:.6g} pu). Check the case-specific "
-            "PLBVFU1 profile and playback model loading.".format(
-                column, minimum, maximum, span
-            )
-        )
-    return result
-
-
 def _plan_transition_times(plan) -> list:
     events = list(getattr(plan, "events", []) or [])
     playback = list(getattr(plan, "playback", []) or [])
@@ -231,7 +175,6 @@ def run_psse_studies(
     plot_in_background: bool = True,
     max_pending_plots: int = 1,
     max_plot_points: int = 20000,
-    validate_disturbances: bool = True,
     resume_completed: bool = True,
 ):
     """Run and immediately plot each completed PSS/E scenario.
@@ -265,7 +208,6 @@ def run_psse_studies(
     config.data["result_postprocessing"] = {
         "plot_results": bool(plot_results),
         "max_plot_points": int(max_plot_points or 0),
-        "validate_disturbances": bool(validate_disturbances),
         "plotter": _source_fingerprint(plotter),
         "pre_process_fn": _source_fingerprint(
             getattr(plotter, "pre_process_fn", None)
@@ -352,7 +294,6 @@ def run_psse_studies(
         write_plan(plans, str(Path(RESULTS_DIR) / "study_plan.json"))
 
     plot_failures = []
-    validation_failures = []
     pending_jobs = []
     worker_enabled = bool(plot_results and plot_in_background)
     executor = ThreadPoolExecutor(max_workers=1) if worker_enabled else None
@@ -367,8 +308,8 @@ def run_psse_studies(
         pdf_path = result_dir / (name + ".pdf")
         if plot_results:
             # A rerun must never publish plots left by an older fingerprint.
-            # Remove them before validation as an invalid TOV never reaches the
-            # plotting block below.
+            # Remove them before rendering so a plot failure cannot leave a
+            # stale PNG/PDF that appears to belong to the current result.
             png_path.unlink(missing_ok=True)
             pdf_path.unlink(missing_ok=True)
         dataframe = dataframe if dataframe is not None else result.get("_dataframe")
@@ -383,30 +324,6 @@ def run_psse_studies(
             dataframe = pd.read_csv(existing_csv)
 
         outcome = {"timings_s": {}}
-        if validate_disturbances and _is_tov_plan(plan):
-            validation_started = time.perf_counter()
-            try:
-                outcome["tov_validation"] = _validate_tov_dataframe(dataframe, plan)
-                outcome["validation_status"] = "passed"
-            except Exception as exc:
-                write_dataframe_csv(dataframe, str(csv_path))
-                outcome.update(
-                    validation_status="failed",
-                    validation_error=str(exc),
-                    plot_status="skipped_invalid_tov",
-                    csv=str(csv_path),
-                )
-                outcome["timings_s"]["validation"] = round(
-                    time.perf_counter() - validation_started, 6
-                )
-                outcome["timings_s"]["postprocess_total"] = round(
-                    time.perf_counter() - started, 6
-                )
-                return outcome
-            outcome["timings_s"]["validation"] = round(
-                time.perf_counter() - validation_started, 6
-            )
-
         if not plot_results:
             outcome["plot_status"] = "disabled"
             if keep_csv_results and not csv_path.exists():
@@ -462,7 +379,7 @@ def run_psse_studies(
                 csv_path.unlink(missing_ok=True)
                 outcome["_remove_csv"] = True
         except Exception as exc:
-            # Preserve a diagnostic CSV only when plotting/validation fails.
+            # Preserve a diagnostic CSV when plotting fails.
             write_dataframe_csv(dataframe, str(csv_path))
             outcome.update(
                 plot_status="failed", plot_error=str(exc), csv=str(csv_path)
@@ -479,16 +396,7 @@ def run_psse_studies(
             result.pop("csv", None)
         result.setdefault("timings_s", {}).update(timing_updates)
         result.update(outcome)
-        if result.get("validation_status") == "failed":
-            validation_failures.append((name, result.get("validation_error", "unknown error")))
-            reporter.emit(
-                "[{}/{}] TOV INVALID {}: {}".format(
-                    number, total, name, result.get("validation_error")
-                ),
-                "failure",
-                "cases",
-            )
-        elif result.get("plot_status") == "completed":
+        if result.get("plot_status") == "completed":
             reporter.emit(
                 "[{}/{}] PLOT OK {} ({:.2f}s, {}/{})".format(
                     number,
@@ -586,7 +494,6 @@ def run_psse_studies(
             continue
         complete = (
             result.get("status") == "completed"
-            and result.get("validation_status") != "failed"
             and (
                 not plot_results
                 or result.get("plot_status") in {"completed", "reused"}
@@ -600,7 +507,6 @@ def run_psse_studies(
             plot_status=result.get("plot_status"),
             error=(
                 result.get("error")
-                or result.get("validation_error")
                 or result.get("plot_error")
             ),
         )
@@ -612,18 +518,17 @@ def run_psse_studies(
     plotted = sum(result.get("plot_status") == "completed" for result in results)
     resumed = sum(result.get("resume_status") == "hit" for result in results)
     reporter.emit(
-        "Run summary: {} completed, {} failed; {} resumed, {} plots created, {} plot failures; "
-        "{} TOV validation failures; {:.2f}s total".format(
+        "Run summary: {} completed, {} failed; {} resumed, {} plots created, "
+        "{} plot failures; {:.2f}s total".format(
             completed,
             len(results) - completed,
             resumed,
             plotted,
             len(plot_failures),
-            len(validation_failures),
             batch_elapsed,
         ),
         "heading"
-        if len(results) == completed and not plot_failures and not validation_failures
+        if len(results) == completed and not plot_failures
         else "warning",
         "cases",
     )
@@ -635,14 +540,6 @@ def run_psse_studies(
         raise RuntimeError(
             "{} plot(s) failed; simulation OUT/CSV files were preserved. First failure {}: {}. See {}".format(
                 len(plot_failures), first_name, first_error, status_path
-            )
-        )
-    if validation_failures:
-        first_name, first_error = validation_failures[0]
-        raise RuntimeError(
-            "{} TOV result(s) were flat/invalid; diagnostic CSV files were preserved. "
-            "First failure {}: {}. See {}".format(
-                len(validation_failures), first_name, first_error, status_path
             )
         )
     return results

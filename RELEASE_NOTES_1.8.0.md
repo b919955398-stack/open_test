@@ -7,9 +7,9 @@
   reusing another case's external playback file and producing a flat TOV run.
 - CSR-style Vslack TOV profiles and structured `TOV_MVAr`/capacitance shunts
   are both compiled into executable disturbances.
-- A TOV plan with no non-flat playback or shunt now fails before PSS/E starts.
-  Completed TOV data is also checked at the POC; a flat voltage channel fails
-  loudly and preserves a diagnostic CSV instead of publishing a plausible plot.
+- TOV results always follow the normal plotting path, including flat traces.
+  The runner does not apply a waveform-range correctness gate; the engineer
+  reviews the generated PNG/PDF and decides whether the response is valid.
 
 ## First-stage performance work
 
@@ -37,9 +37,9 @@
 
 ## Validation
 
-- Regression coverage verifies real CSR TOV profile compilation, missing-TOV
-  rejection, structured MVAr shunts, unique playback stems, flat-result
-  detection, direct OUT decoding, transition-preserving downsampling and safe
-  result resume.
+- Regression coverage verifies real CSR TOV profile compilation, structured
+  MVAr shunts, unique playback stems, flat-result plotting without automatic
+  waveform judgement, direct OUT decoding, transition-preserving downsampling
+  and safe result resume.
 - Real licensed PSS/E 34 execution remains the final validation step on the
   Windows study machine.
