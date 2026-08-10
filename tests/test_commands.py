@@ -49,15 +49,17 @@ class CommandTests(unittest.TestCase):
         self.assertGreater(playback[0].voltage_pu, 0.9)
         self.assertNotEqual(playback[0].voltage_pu, 1.0)
 
-    def test_tov_plan_rejects_a_silent_flat_run(self):
+    def test_tov_plan_allows_a_flat_profile_for_user_review(self):
         scenario = Scenario("5255_TOV", 2, "flat_tov", True, {
             "Category": "5255_TOV",
             "U_Ov": 1.2,
             "Post_Init_Duration_s": 2.0,
             "Vslack_pu_psse": "1, WITH SCALING=1.057",
         })
-        with self.assertRaisesRegex(ValueError, "no executable voltage disturbance"):
-            build_plan(scenario)
+        plan = build_plan(scenario)
+        self.assertEqual(plan.events, [])
+        self.assertEqual(len(plan.playback), 1)
+        self.assertAlmostEqual(plan.playback[0].voltage_pu, 1.057)
 
     def test_real_csr_tov_shape_compiles_to_nonflat_playback(self):
         scenario = Scenario("5255_TOV", 2, "csr_tov", True, {

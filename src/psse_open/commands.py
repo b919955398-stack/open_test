@@ -25,20 +25,6 @@ def _first_number(scenario: Scenario, names, default=None):
     return default
 
 
-def _is_tov_scenario(scenario: Scenario) -> bool:
-    labels = "{} {} {}".format(
-        scenario.sheet,
-        scenario.get("Category", ""),
-        scenario.get("Test Type", ""),
-    ).upper()
-    return (
-        "TOV" in labels
-        or "TEMPORARY OVER" in labels
-        or scenario.get("U_Ov") not in (None, "")
-        or scenario.get("TOV_Timing_Signal_sig") not in (None, "")
-    )
-
-
 def _initial_profile_value(value: Any, default: float = 0.0) -> float:
     return initial_signal_value(value, default)
 
@@ -248,24 +234,6 @@ def build_plan(scenario: Scenario) -> StudyPlan:
                 events.append(Event(0.0, len(events), "callback", {"name": str(name).strip()}))
 
     events.sort()
-    if _is_tov_scenario(scenario):
-        voltage_values = [
-            float(point.voltage_pu)
-            for point in playback
-            if point.voltage_pu is not None
-        ]
-        playback_span = (
-            max(voltage_values) - min(voltage_values) if voltage_values else 0.0
-        )
-        has_tov_shunt = any(event.kind == "tov_shunt_apply" for event in events)
-        if playback_span <= 1.0e-9 and not has_tov_shunt:
-            raise ValueError(
-                "TOV scenario {} has no executable voltage disturbance. "
-                "Populate Vslack_pu_psse/Vslack_pu_sig with a non-flat profile, "
-                "or provide TOV_Shunt_C_uF_sig/TOV_MVAr.".format(
-                    scenario.file_name
-                )
-            )
     if events and events[-1].time > scenario.end_time:
         warnings.append("Last event at {:.3f}s exceeds end time {:.3f}s".format(events[-1].time, scenario.end_time))
     return StudyPlan(scenario, events, playback, warnings)
