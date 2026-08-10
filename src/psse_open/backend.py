@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import glob
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -248,9 +249,14 @@ class PsseBackend:
             self._check(self.psspy.plant_data(bus, [bus], [bus_voltage, self._f]), "lock generator voltage schedule")
         self.solve_load_flow(3)
 
-    def _write_playback(self, work_dir: Path, points: Iterable[PlaybackPoint]) -> Tuple[Path, Path]:
+    def _write_playback(
+        self,
+        work_dir: Path,
+        points: Iterable[PlaybackPoint],
+        file_stem: Optional[str] = None,
+    ) -> Tuple[Path, Path, Dict[str, Any]]:
         settings = self.config.section("playback")
-        stem = str(settings.get("file_stem", "playback"))
+        stem = str(file_stem or settings.get("file_stem", "playback"))
         plb_path = work_dir / (stem + ".plb")
         dyr_path = work_dir / (stem + ".dyr")
         infinite = int(self.system["infinite_bus"])
@@ -259,19 +265,36 @@ class PsseBackend:
         nominal_frequency = float(self.config.section("dynamics").get("frequency_hz", 50.0))
         last_voltage = initial_voltage
         last_frequency = nominal_frequency
+        written_points = []
         with open(plb_path, "w", encoding="ascii", newline="\n") as stream:
             for point in points:
                 voltage = initial_voltage if point.voltage_pu is None else float(point.voltage_pu)
                 frequency = nominal_frequency if point.frequency_hz is None else float(point.frequency_hz)
                 stream.write("{:.9g} {:.9g} {:.9g}\n".format(point.time, voltage, frequency))
                 last_voltage, last_frequency = voltage, frequency
+                written_points.append((float(point.time), voltage, frequency))
             stream.write("99999 {:.9g} {:.9g}\n".format(last_voltage, last_frequency))
         record = "{}, 'USRMDL', {}, 'PLBVFU1', 1, 1, 3, 4, 3, 6, 1, 1, '{}', 1.0, {:.9g}, 0.000, 0.000 /\n".format(
             infinite, int(machine_id), stem, nominal_frequency
         )
         with open(dyr_path, "w", encoding="ascii", newline="\n") as stream:
             stream.write(record)
-        return plb_path, dyr_path
+        voltages = [item[1] for item in written_points]
+        frequencies = [item[2] for item in written_points]
+        metadata = {
+            "stem": stem,
+            "plb_path": str(plb_path),
+            "dyr_path": str(dyr_path),
+            "points": len(written_points),
+            "voltage_min_pu": min(voltages) if voltages else initial_voltage,
+            "voltage_max_pu": max(voltages) if voltages else initial_voltage,
+            "voltage_span_pu": (
+                max(voltages) - min(voltages) if voltages else 0.0
+            ),
+            "frequency_min_hz": min(frequencies) if frequencies else nominal_frequency,
+            "frequency_max_hz": max(frequencies) if frequencies else nominal_frequency,
+        }
+        return plb_path, dyr_path, metadata
 
     def initialize_dynamics(
         self,
@@ -280,7 +303,7 @@ class PsseBackend:
         out_path: Path,
         playback: List[PlaybackPoint],
         initialised_sav_path: Optional[Path] = None,
-    ) -> None:
+    ) -> Dict[str, Any]:
         self._check(self.psspy.cong(0), "convert generators")
         for stage in (1, 2, 3):
             self._check(self.psspy.conl(0, 1, stage, [0, 0], [100.0, 0.0, 0.0, 100.0]), "convert loads stage {}".format(stage))
@@ -291,8 +314,24 @@ class PsseBackend:
             self._check(self.psspy.addmodellibrary(dll), "load model library {}".format(dll))
         self._check(self.psspy.dyre_new([1, 1, 1, 1], str(dyr_path)), "load DYR")
 
+        playback_metadata: Dict[str, Any] = {}
         if playback:
-            _plb_path, playback_dyr = self._write_playback(work_dir, playback)
+            # PLBVFU1 can retain the same external file stem across repeated
+            # initialisations.  The native runner shares one runtime directory,
+            # unlike the former one-directory-per-case workflow, so give every
+            # scenario an eight-character stem to prevent stale profile reuse.
+            profile_identity = [
+                (point.time, point.voltage_pu, point.frequency_hz)
+                for point in playback
+            ]
+            playback_key = "{}|{}".format(
+                Path(out_path).resolve(), repr(profile_identity)
+            )
+            digest = hashlib.sha256(playback_key.encode("utf-8")).hexdigest()
+            playback_stem = "plb" + digest[:5]
+            _plb_path, playback_dyr, playback_metadata = self._write_playback(
+                work_dir, playback, file_stem=playback_stem
+            )
             infinite = int(self.system["infinite_bus"])
             machine_id = str(self.system["infinite_machine"].get("id", "1"))
             self._check(self.psspy.plmod_remove(infinite, machine_id, 1), "remove infinite machine dynamic model")
@@ -323,6 +362,7 @@ class PsseBackend:
         status = self.psspy.okstrt()
         if status not in (0,):
             raise PsseError("Dynamic initialization failed; okstrt returned {}".format(status))
+        return playback_metadata
 
     def add_channels(self) -> None:
         definition = self.config.section("channel_definition")
@@ -514,11 +554,29 @@ class PsseBackend:
         shunt_id = str(configured.get("id", "1"))
         b_mvar = 0.0
         if enabled:
-            capacitance_uf = float(payload.get("capacitance_uf", 0.0))
-            base_kv = float(self._check(self.psspy.busdat(bus, "BASE"), "read TOV shunt base kV"))
-            frequency_hz = float(self.config.section("dynamics").get("frequency_hz", 50.0))
-            # Q(MVAr) = 2*pi*f*C(uF)*1e-6*V(kV)^2.
-            b_mvar = 2.0 * math.pi * frequency_hz * capacitance_uf * 1.0e-6 * base_kv * base_kv
+            if payload.get("mvar") not in (None, ""):
+                b_mvar = float(payload["mvar"])
+            else:
+                capacitance_uf = float(payload.get("capacitance_uf", 0.0))
+                base_kv = float(
+                    self._check(
+                        self.psspy.busdat(bus, "BASE"),
+                        "read TOV shunt base kV",
+                    )
+                )
+                frequency_hz = float(
+                    self.config.section("dynamics").get("frequency_hz", 50.0)
+                )
+                # Q(MVAr) = 2*pi*f*C(uF)*1e-6*V(kV)^2.
+                b_mvar = (
+                    2.0
+                    * math.pi
+                    * frequency_hz
+                    * capacitance_uf
+                    * 1.0e-6
+                    * base_kv
+                    * base_kv
+                )
         self._change_fixed_shunt(bus, shunt_id, 1 if enabled else 0, b_mvar)
 
     def apply_event(self, event: Event, scenario: Scenario) -> None:

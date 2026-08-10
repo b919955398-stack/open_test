@@ -13,8 +13,10 @@ def before_case(backend, scenario, work_dir):
 def before_dispatch(backend, scenario, work_dir):
     """Static setup applied before P/Q/V dispatch and saved in the cached SAV.
 
-    If this hook reads a project-specific SPEC column, add that column to
-    ``DISPATCH_KEY_COLUMNS`` in the PSS/E master.
+    If this hook reads a project-specific SPEC column that is not detected
+    automatically, add it to ``DEFAULT_DISPATCH_KEY_COLUMNS`` in
+    ``studyrunners/psse_study_runner.py``. Keep technical cache choices out of
+    the company-format master.
     """
     pass
 

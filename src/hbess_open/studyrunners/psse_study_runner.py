@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import inspect
 import json
 from pathlib import Path
 from typing import Any, List
+import time
 
 import pandas as pd
 
-from hbess_open.open_psse.plot_adapter import invoke_project_plotter
+from hbess_open.open_psse.plot_adapter import (
+    downsample_dataframe_for_plot,
+    invoke_project_plotter_from_dataframe,
+)
 from psse_open.commands import build_plan
 from psse_open.config import ProjectConfig
 from psse_open.definitions import load_or_build_project_config
@@ -15,6 +22,10 @@ from psse_open.grid import impedance_from_fault_level, infinite_bus_voltage
 from psse_open.models import Scenario
 from psse_open.profiles import parse_signal_profile
 from psse_open.progress import ConsoleReporter
+from psse_open.output import write_dataframe_csv
+
+
+_NATIVE_STUDY_ENGINE_CLASS = StudyEngine
 
 
 INF_INIT_GRID_SCR = 3.68
@@ -39,6 +50,10 @@ DEFAULT_SPEC_FIELDS_TO_PRINT = [
     "Post_Init_Duration_s",
     "Steps_per_write",
 ]
+
+# Add a project-specific steady-state column here only when a dispatch hook
+# reads it and its name is not covered by the automatic detector.
+DEFAULT_DISPATCH_KEY_COLUMNS = []
 
 
 def _initial_numeric(value: Any, default: float = 0.0) -> float:
@@ -108,6 +123,88 @@ def _scenario_from_row(index: Any, row: pd.Series) -> Scenario:
     )
 
 
+def _is_tov_plan(plan) -> bool:
+    scenario = plan.scenario
+    labels = "{} {}".format(scenario.sheet, scenario.category).upper()
+    return (
+        "TOV" in labels
+        or "TEMPORARY OVER" in labels
+        or scenario.get("U_Ov") not in (None, "")
+        or scenario.get("TOV_Timing_Signal_sig") not in (None, "")
+    )
+
+
+def _validate_tov_dataframe(dataframe: pd.DataFrame, plan) -> dict:
+    """Reject the silent-success mode where a TOV result is completely flat."""
+    candidates = (
+        "V_POC_PU",
+        "POC_VOLTAGE",
+        "Vpoc_pu",
+        "VPOC_PU",
+    )
+    column = next((name for name in candidates if name in dataframe.columns), None)
+    if column is None:
+        matching = [
+            name
+            for name in dataframe.columns
+            if "POC" in str(name).upper() and "V" in str(name).upper()
+        ]
+        raise RuntimeError(
+            "TOV validation cannot find the POC voltage channel. Available POC-like "
+            "channels: {}".format(", ".join(map(str, matching)) or "<none>")
+        )
+    voltage = pd.to_numeric(dataframe[column], errors="coerce").dropna()
+    if voltage.empty:
+        raise RuntimeError("TOV POC voltage channel {!r} contains no numeric data".format(column))
+    minimum = float(voltage.min())
+    maximum = float(voltage.max())
+    span = maximum - minimum
+    target = plan.scenario.get("U_Ov")
+    result = {
+        "status": "passed",
+        "channel": column,
+        "minimum_pu": minimum,
+        "maximum_pu": maximum,
+        "span_pu": span,
+        "target_pu": None if target in (None, "") else float(target),
+    }
+    if span <= 1.0e-3:
+        raise RuntimeError(
+            "TOV disturbance did not reach the POC: channel {} is flat "
+            "(min={:.6g}, max={:.6g}, span={:.6g} pu). Check the case-specific "
+            "PLBVFU1 profile and playback model loading.".format(
+                column, minimum, maximum, span
+            )
+        )
+    return result
+
+
+def _plan_transition_times(plan) -> list:
+    events = list(getattr(plan, "events", []) or [])
+    playback = list(getattr(plan, "playback", []) or [])
+    return sorted(
+        {
+            float(item.time)
+            for item in events + playback
+        }
+    )
+
+
+def _source_fingerprint(value) -> dict:
+    if value is None:
+        return {"type": "none"}
+    target = value if inspect.isfunction(value) else type(value)
+    path = inspect.getsourcefile(target)
+    result = {
+        "module": getattr(target, "__module__", ""),
+        "name": getattr(target, "__qualname__", getattr(target, "__name__", "")),
+    }
+    if path and Path(path).is_file():
+        digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        result.update(file=Path(path).name, sha256=digest)
+    return result
+
+
 def run_psse_studies(
     spec: pd.DataFrame,
     plotter: object,
@@ -120,7 +217,7 @@ def run_psse_studies(
     keep_psse_logs: bool = False,
     keep_result_dyr: bool = True,
     keep_initialised_sav: bool = True,
-    psse_output_mode: str = None,
+    psse_output_mode: str = "console",
     verbose: bool = True,
     use_dispatch_cache: bool = True,
     dispatch_cache_dir: str = None,
@@ -131,6 +228,11 @@ def run_psse_studies(
     progress_level: str = "commands",
     print_case_spec: bool = True,
     spec_fields_to_print: List[str] = None,
+    plot_in_background: bool = True,
+    max_pending_plots: int = 1,
+    max_plot_points: int = 20000,
+    validate_disturbances: bool = True,
+    resume_completed: bool = True,
 ):
     """Run and immediately plot each completed PSS/E scenario.
 
@@ -156,6 +258,19 @@ def run_psse_studies(
     config.data["keep_psse_logs"] = bool(keep_psse_logs)
     config.data["keep_result_dyr"] = bool(keep_result_dyr)
     config.data["keep_initialised_sav"] = bool(keep_initialised_sav)
+    config.data["keep_csv_results"] = bool(keep_csv_results)
+    config.data["in_memory_postprocessing"] = True
+    config.data["resume_completed_results"] = bool(resume_completed)
+    config.data["resume_require_plots"] = bool(plot_results)
+    config.data["result_postprocessing"] = {
+        "plot_results": bool(plot_results),
+        "max_plot_points": int(max_plot_points or 0),
+        "validate_disturbances": bool(validate_disturbances),
+        "plotter": _source_fingerprint(plotter),
+        "pre_process_fn": _source_fingerprint(
+            getattr(plotter, "pre_process_fn", None)
+        ),
+    }
     if psse_output_mode in (None, ""):
         effective_psse_output_mode = "files" if keep_psse_logs else "quiet"
     else:
@@ -172,7 +287,11 @@ def run_psse_studies(
         "enabled": bool(use_dispatch_cache),
         "directory": str(resolved_cache_dir),
         "rebuild": bool(rebuild_dispatch_cache),
-        "key_columns": list(dispatch_key_columns or []),
+        "key_columns": list(
+            DEFAULT_DISPATCH_KEY_COLUMNS
+            if dispatch_key_columns is None
+            else dispatch_key_columns
+        ),
         "automatic_key_columns": bool(auto_dispatch_key_columns),
         "verify_hashes": bool(verify_dispatch_cache_hashes),
     }
@@ -233,73 +352,279 @@ def run_psse_studies(
         write_plan(plans, str(Path(RESULTS_DIR) / "study_plan.json"))
 
     plot_failures = []
+    validation_failures = []
+    pending_jobs = []
+    worker_enabled = bool(plot_results and plot_in_background)
+    executor = ThreadPoolExecutor(max_workers=1) if worker_enabled else None
+    pending_limit = max(1, int(max_pending_plots or 1))
+
+    def postprocess_case(result, plan, dataframe=None):
+        started = time.perf_counter()
+        name = result["file_name"]
+        result_dir = Path(result["out"]).parent
+        csv_path = result_dir / (name + ".csv")
+        png_path = result_dir / (name + ".png")
+        pdf_path = result_dir / (name + ".pdf")
+        if plot_results:
+            # A rerun must never publish plots left by an older fingerprint.
+            # Remove them before validation as an invalid TOV never reaches the
+            # plotting block below.
+            png_path.unlink(missing_ok=True)
+            pdf_path.unlink(missing_ok=True)
+        dataframe = dataframe if dataframe is not None else result.get("_dataframe")
+        if dataframe is None:
+            existing_csv = result.get("csv")
+            if not existing_csv:
+                return {
+                    "plot_status": "failed",
+                    "plot_error": "Completed study has neither in-memory OUT data nor CSV",
+                    "timings_s": {"postprocess_total": 0.0},
+                }
+            dataframe = pd.read_csv(existing_csv)
+
+        outcome = {"timings_s": {}}
+        if validate_disturbances and _is_tov_plan(plan):
+            validation_started = time.perf_counter()
+            try:
+                outcome["tov_validation"] = _validate_tov_dataframe(dataframe, plan)
+                outcome["validation_status"] = "passed"
+            except Exception as exc:
+                write_dataframe_csv(dataframe, str(csv_path))
+                outcome.update(
+                    validation_status="failed",
+                    validation_error=str(exc),
+                    plot_status="skipped_invalid_tov",
+                    csv=str(csv_path),
+                )
+                outcome["timings_s"]["validation"] = round(
+                    time.perf_counter() - validation_started, 6
+                )
+                outcome["timings_s"]["postprocess_total"] = round(
+                    time.perf_counter() - started, 6
+                )
+                return outcome
+            outcome["timings_s"]["validation"] = round(
+                time.perf_counter() - validation_started, 6
+            )
+
+        if not plot_results:
+            outcome["plot_status"] = "disabled"
+            if keep_csv_results and not csv_path.exists():
+                csv_started = time.perf_counter()
+                write_dataframe_csv(dataframe, str(csv_path))
+                outcome["csv"] = str(csv_path)
+                outcome["timings_s"]["csv_write"] = round(
+                    time.perf_counter() - csv_started, 6
+                )
+            elif not keep_csv_results:
+                csv_path.unlink(missing_ok=True)
+                outcome["_remove_csv"] = True
+            outcome["timings_s"]["postprocess_total"] = round(
+                time.perf_counter() - started, 6
+            )
+            return outcome
+
+        try:
+            downsample_started = time.perf_counter()
+            plot_frame = downsample_dataframe_for_plot(
+                dataframe,
+                max_points=max_plot_points,
+                event_times=_plan_transition_times(plan),
+            )
+            outcome["plot_points"] = {
+                "source": len(dataframe),
+                "rendered": len(plot_frame),
+            }
+            outcome["timings_s"]["plot_downsample"] = round(
+                time.perf_counter() - downsample_started, 6
+            )
+            plot_started = time.perf_counter()
+            created = invoke_project_plotter_from_dataframe(
+                plotter,
+                plot_frame,
+                plan.scenario.values,
+                str(result_dir),
+                source_description=str(result["out"]),
+            )
+            if not created:
+                raise RuntimeError(
+                    "Plotter does not provide plot_from_df_and_dict"
+                )
+            outcome.update(
+                plot_status="completed", png=str(png_path), pdf=str(pdf_path)
+            )
+            outcome["timings_s"]["plot"] = round(
+                time.perf_counter() - plot_started, 6
+            )
+            if keep_csv_results:
+                outcome["csv"] = str(csv_path)
+            else:
+                csv_path.unlink(missing_ok=True)
+                outcome["_remove_csv"] = True
+        except Exception as exc:
+            # Preserve a diagnostic CSV only when plotting/validation fails.
+            write_dataframe_csv(dataframe, str(csv_path))
+            outcome.update(
+                plot_status="failed", plot_error=str(exc), csv=str(csv_path)
+            )
+        outcome["timings_s"]["postprocess_total"] = round(
+            time.perf_counter() - started, 6
+        )
+        return outcome
+
+    def apply_outcome(result, outcome, number, total):
+        name = result["file_name"]
+        timing_updates = outcome.pop("timings_s", {})
+        if outcome.pop("_remove_csv", False):
+            result.pop("csv", None)
+        result.setdefault("timings_s", {}).update(timing_updates)
+        result.update(outcome)
+        if result.get("validation_status") == "failed":
+            validation_failures.append((name, result.get("validation_error", "unknown error")))
+            reporter.emit(
+                "[{}/{}] TOV INVALID {}: {}".format(
+                    number, total, name, result.get("validation_error")
+                ),
+                "failure",
+                "cases",
+            )
+        elif result.get("plot_status") == "completed":
+            reporter.emit(
+                "[{}/{}] PLOT OK {} ({:.2f}s, {}/{})".format(
+                    number,
+                    total,
+                    result.get("png"),
+                    float(result.get("timings_s", {}).get("plot", 0.0)),
+                    result.get("plot_points", {}).get("rendered", 0),
+                    result.get("plot_points", {}).get("source", 0),
+                ),
+                "success",
+                "cases",
+            )
+        elif result.get("plot_status") == "failed":
+            plot_failures.append((name, result.get("plot_error", "unknown error")))
+            reporter.emit(
+                "[{}/{}] PLOT FAILED {}: {}".format(
+                    number, total, name, result.get("plot_error")
+                ),
+                "failure",
+                "cases",
+            )
+
+    def drain_oldest():
+        future, result, number, total = pending_jobs.pop(0)
+        try:
+            outcome = future.result()
+        except Exception as exc:
+            outcome = {"plot_status": "failed", "plot_error": str(exc)}
+        apply_outcome(result, outcome, number, total)
 
     def on_result(result, plan, number, total):
         name = result["file_name"]
         if result.get("status") != "completed":
             result["plot_status"] = "skipped_study_failed"
-            if verbose:
-                reporter.emit(
-                    "[{}/{}] STUDY FAILED {}: {}".format(
-                        number, total, name, result.get("error", "unknown error")
-                    ),
-                    "failure",
-                    "cases",
-                )
-            return
-        if verbose:
             reporter.emit(
-                "[{}/{}] STUDY OK {} ({:.2f}s)".format(
-                    number, total, name, float(result.get("elapsed_s", 0.0))
+                "[{}/{}] STUDY FAILED {}: {}".format(
+                    number, total, name, result.get("error", "unknown error")
                 ),
+                "failure",
+                "cases",
+            )
+            return
+        if result.get("resume_status") == "hit":
+            result["plot_status"] = "reused"
+            reporter.emit(
+                "[{}/{}] RESUME OK {}".format(number, total, name),
                 "success",
                 "cases",
             )
-        csv_path = Path(result["csv"])
-        if not plot_results:
-            result["plot_status"] = "disabled"
-            if not keep_csv_results:
-                csv_path.unlink(missing_ok=True)
-                result.pop("csv", None)
-            if verbose:
-                reporter.emit("[{}/{}] PLOT DISABLED {}".format(number, total, name), "warning", "cases")
             return
-        result_dir = Path(result["out"]).parent
-        png_path = result_dir / (name + ".png")
-        pdf_path = result_dir / (name + ".pdf")
-        try:
-            invoke_project_plotter(plotter, str(csv_path), plan.scenario.values, str(result_dir))
-            result.update(plot_status="completed", png=str(png_path), pdf=str(pdf_path))
-            if not keep_csv_results:
-                csv_path.unlink(missing_ok=True)
-                result.pop("csv", None)
-            if verbose:
-                reporter.emit("[{}/{}] PLOT OK {}".format(number, total, png_path), "success", "cases")
-        except Exception as exc:
-            result.update(plot_status="failed", plot_error=str(exc))
-            plot_failures.append((name, str(exc)))
-            # Preserve the CSV only for a failed plot; it is the quickest way
-            # to diagnose a chandef/plotter mismatch.
-            if verbose:
-                reporter.emit(
-                    "[{}/{}] PLOT FAILED {}: {}".format(number, total, name, exc),
-                    "failure",
-                    "cases",
-                )
+        reporter.emit(
+            "[{}/{}] STUDY OK {} ({:.2f}s)".format(
+                number, total, name, float(result.get("elapsed_s", 0.0))
+            ),
+            "success",
+            "cases",
+        )
+        dataframe = result.get("_dataframe")
+        if executor is None:
+            apply_outcome(
+                result,
+                postprocess_case(result, plan, dataframe),
+                number,
+                total,
+            )
+            return
+        while len(pending_jobs) >= pending_limit:
+            drain_oldest()
+        result["plot_status"] = "queued"
+        pending_jobs.append(
+            (
+                executor.submit(postprocess_case, result, plan, dataframe),
+                result,
+                number,
+                total,
+            )
+        )
 
-    # StudyEngine invokes this callback before starting the next scenario.
-    results = StudyEngine(config).run(plans, result_callback=on_result)
+    batch_started = time.perf_counter()
+    try:
+        # Callback submits plotting work and returns, allowing PSS/E to start the
+        # next case while the single background worker renders the previous one.
+        results = StudyEngine(config).run(plans, result_callback=on_result)
+        while pending_jobs:
+            drain_oldest()
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
+    batch_elapsed = time.perf_counter() - batch_started
+
+    for result, plan in zip(results, plans):
+        json_value = result.get("json")
+        fingerprint = result.get("result_fingerprint")
+        if not json_value or not fingerprint:
+            continue
+        complete = (
+            result.get("status") == "completed"
+            and result.get("validation_status") != "failed"
+            and (
+                not plot_results
+                or result.get("plot_status") in {"completed", "reused"}
+            )
+        )
+        _NATIVE_STUDY_ENGINE_CLASS._write_result_metadata(
+            Path(json_value),
+            plan.scenario.values,
+            fingerprint,
+            "completed" if complete else "failed",
+            plot_status=result.get("plot_status"),
+            error=(
+                result.get("error")
+                or result.get("validation_error")
+                or result.get("plot_error")
+            ),
+        )
 
     status_path = Path(RESULTS_DIR) / "run_status.json"
     with open(status_path, "w", encoding="utf-8") as stream:
         json.dump(results, stream, indent=2, ensure_ascii=False)
     completed = sum(result.get("status") == "completed" for result in results)
     plotted = sum(result.get("plot_status") == "completed" for result in results)
+    resumed = sum(result.get("resume_status") == "hit" for result in results)
     reporter.emit(
-        "Run summary: {} completed, {} failed; {} plots created, {} plot failures".format(
-            completed, len(results) - completed, plotted, len(plot_failures)
+        "Run summary: {} completed, {} failed; {} resumed, {} plots created, {} plot failures; "
+        "{} TOV validation failures; {:.2f}s total".format(
+            completed,
+            len(results) - completed,
+            resumed,
+            plotted,
+            len(plot_failures),
+            len(validation_failures),
+            batch_elapsed,
         ),
-        "heading" if len(results) == completed and not plot_failures else "warning",
+        "heading"
+        if len(results) == completed and not plot_failures and not validation_failures
+        else "warning",
         "cases",
     )
     reporter.emit("Status file: {}".format(status_path), "heading", "cases")
@@ -310,6 +635,14 @@ def run_psse_studies(
         raise RuntimeError(
             "{} plot(s) failed; simulation OUT/CSV files were preserved. First failure {}: {}. See {}".format(
                 len(plot_failures), first_name, first_error, status_path
+            )
+        )
+    if validation_failures:
+        first_name, first_error = validation_failures[0]
+        raise RuntimeError(
+            "{} TOV result(s) were flat/invalid; diagnostic CSV files were preserved. "
+            "First failure {}: {}. See {}".format(
+                len(validation_failures), first_name, first_error, status_path
             )
         )
     return results

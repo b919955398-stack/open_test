@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import tempfile
@@ -15,8 +16,13 @@ from .commands import build_plan
 from .dispatch import DispatchCache, DispatchPlan, create_dispatch_plan
 from .hooks import call_hook, load_hooks
 from .models import Scenario, StudyPlan
-from .output import out_to_csv
+from .output import out_to_csv, out_to_dataframe, write_dataframe_csv
 from .progress import ConsoleReporter
+
+
+RESULT_METADATA_KEY = "_native_run"
+RESULT_METADATA_SCHEMA_VERSION = 1
+RESULT_ALGORITHM_VERSION = "native-psse-result-v1.8.0"
 
 
 def _json_default(value):
@@ -29,6 +35,48 @@ def _json_default(value):
     if isinstance(value, Path):
         return str(value)
     raise TypeError("Object of type {} is not JSON serializable".format(type(value).__name__))
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(str(path), "rb") as stream:
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _stable_json_bytes(value) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+        default=_json_default,
+    ).encode("utf-8")
+
+
+def _publish_by_move(source: Path, target: Path) -> None:
+    """Publish a staged result without copying when both paths share a volume."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(str(source), str(target))
+    except OSError:
+        shutil.copy2(str(source), str(target))
+        source.unlink(missing_ok=True)
+
+
+def _publish_by_link(source: Path, target: Path) -> None:
+    """Hard-link immutable input data into results, with a portable copy fallback."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    try:
+        os.link(str(source), str(target))
+    except OSError:
+        shutil.copy2(str(source), str(target))
 
 
 def create_plans(scenarios: Iterable[Scenario]) -> List[StudyPlan]:
@@ -74,6 +122,140 @@ class StudyEngine:
             reporter = getattr(self.config, "reporter", None) or ConsoleReporter.from_config(self.config)
             self.reporter = reporter
         return reporter
+
+    def _result_fingerprint(self, plan: StudyPlan) -> str:
+        """Fingerprint the scenario, compiled commands and every model input.
+
+        A result is reusable only when this value and the complete artifact set
+        match.  Output paths, console verbosity and cache location are excluded
+        because they do not alter the numerical result or plots.
+        """
+        model_fingerprint = getattr(self, "_result_model_fingerprint", None)
+        if model_fingerprint is None:
+            model_digest = hashlib.sha256()
+            model_digest.update(RESULT_ALGORITHM_VERSION.encode("ascii"))
+            model_digest.update(
+                _stable_json_bytes(
+                    {
+                        name: self.config.data.get(name, {})
+                        for name in (
+                            "psse",
+                            "bases",
+                            "system",
+                            "load_flow",
+                            "dynamics",
+                            "initialization",
+                            "channel_definition",
+                            "playback",
+                            "result_postprocessing",
+                        )
+                    }
+                )
+            )
+
+            files = self.config.section("files")
+            candidates = [
+                ("sav", self.config.resolve(files["sav"])),
+                ("dyr", self.config.resolve(files["dyr"])),
+            ]
+            for pattern in files.get("copy_globs", ["*.dll", "*.txt", "*.cfg"]):
+                for path in sorted(self.config.base_dir.glob(pattern)):
+                    candidates.append(("runtime:" + path.name, path))
+            for name, value in sorted(self.config.section("definition_files").items()):
+                candidates.append(
+                    ("definition:" + str(name), self.config.resolve(str(value)))
+                )
+            hooks_file = self.config.data.get("hooks_file")
+            if hooks_file:
+                candidates.append(("hooks", self.config.resolve(str(hooks_file))))
+
+            seen = set()
+            for label, path in candidates:
+                path = Path(path)
+                identity = str(path.resolve())
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                model_digest.update(str(label).encode("utf-8"))
+                model_digest.update(path.name.encode("utf-8"))
+                if path.is_file():
+                    model_digest.update(_sha256_file(path).encode("ascii"))
+                else:
+                    model_digest.update(b"MISSING")
+            model_fingerprint = model_digest.hexdigest()
+            self._result_model_fingerprint = model_fingerprint
+
+        digest = hashlib.sha256()
+        digest.update(model_fingerprint.encode("ascii"))
+        digest.update(
+            _stable_json_bytes(
+                {"scenario": plan.scenario.values, "plan": plan.as_dict()}
+            )
+        )
+        return digest.hexdigest()
+
+    @staticmethod
+    def _write_result_metadata(
+        json_path: Path,
+        scenario_values,
+        fingerprint: str,
+        status: str,
+        **metadata,
+    ) -> None:
+        payload = dict(scenario_values)
+        payload[RESULT_METADATA_KEY] = {
+            "schema_version": RESULT_METADATA_SCHEMA_VERSION,
+            "algorithm_version": RESULT_ALGORITHM_VERSION,
+            "fingerprint": fingerprint,
+            "status": status,
+            **metadata,
+        }
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(json_path, "w", encoding="utf-8") as stream:
+            json.dump(
+                payload,
+                stream,
+                indent=2,
+                ensure_ascii=False,
+                allow_nan=False,
+                default=_json_default,
+            )
+
+    @staticmethod
+    def _resume_result(
+        json_path: Path,
+        fingerprint: str,
+        paths: dict,
+    ) -> Optional[dict]:
+        if not json_path.is_file():
+            return None
+        try:
+            with open(json_path, "r", encoding="utf-8") as stream:
+                payload = json.load(stream)
+            metadata = payload.get(RESULT_METADATA_KEY, {})
+        except (OSError, ValueError, TypeError):
+            return None
+        if (
+            metadata.get("schema_version") != RESULT_METADATA_SCHEMA_VERSION
+            or metadata.get("algorithm_version") != RESULT_ALGORITHM_VERSION
+            or metadata.get("fingerprint") != fingerprint
+            or metadata.get("status") != "completed"
+        ):
+            return None
+        if any(
+            not path.is_file() or path.stat().st_size <= 0
+            for path in paths.values()
+        ):
+            return None
+        result = {
+            "status": "completed",
+            "resume_status": "hit",
+            "result_fingerprint": fingerprint,
+            "elapsed_s": 0.0,
+            "timings_s": {"resume_check": 0.0, "engine_total": 0.0},
+        }
+        result.update({name: str(path) for name, path in paths.items()})
+        return result
 
     def _prepare_dispatch_cases(
         self,
@@ -227,6 +409,9 @@ class StudyEngine:
         callers can plot that case before the next simulation starts.
         """
         plans = list(plans)
+        # Cache expensive SAV/DYR hashes across cases, but never across separate
+        # run() calls where a model file may have changed in place.
+        self._result_model_fingerprint = None
         output_root = self.config.resolve(self.config.data.get("output_dir", "outputs"))
         output_root.mkdir(parents=True, exist_ok=True)
         results: List[dict] = []
@@ -234,6 +419,17 @@ class StudyEngine:
         keep_runtime = bool(self.config.data.get("keep_runtime_files", False))
         keep_result_dyr = bool(self.config.data.get("keep_result_dyr", True))
         keep_initialised_sav = bool(self.config.data.get("keep_initialised_sav", True))
+        keep_csv_results = bool(self.config.data.get("keep_csv_results", False))
+        keep_scenario_json = bool(self.config.data.get("keep_scenario_json", True))
+        resume_completed = bool(
+            self.config.data.get("resume_completed_results", False)
+        )
+        resume_require_plots = bool(
+            self.config.data.get("resume_require_plots", False)
+        )
+        in_memory_postprocessing = bool(
+            self.config.data.get("in_memory_postprocessing", False)
+        )
         dispatch_settings = self.config.section("dispatch_cache")
         use_dispatch_cache = bool(dispatch_settings.get("enabled", False))
         reporter = self._console()
@@ -273,20 +469,73 @@ class StudyEngine:
                     "initialised_{}_{:04d}.sav".format(os.getpid(), number)
                 )
                 initialised_staging_path.unlink(missing_ok=True)
-                if bool(self.config.data.get("keep_scenario_json", True)):
-                    with open(json_path, "w", encoding="utf-8") as stream:
-                        json.dump(
-                            plan.scenario.values,
-                            stream,
-                            indent=2,
-                            ensure_ascii=False,
-                            allow_nan=False,
-                            default=_json_default,
-                        )
-
                 assignment = dispatch_plan.assignments[number - 1] if dispatch_plan is not None else None
                 dispatch_state = dispatch_states.get(assignment.key) if assignment is not None else None
-                result = {"file_name": plan.scenario.file_name, "status": "running"}
+                fingerprint = self._result_fingerprint(plan)
+                expected_paths = {"json": json_path, "out": out_path}
+                if keep_result_dyr:
+                    expected_paths["dyr"] = result_dyr_path
+                if keep_initialised_sav:
+                    expected_paths["initialised_sav"] = initialised_sav_path
+                if resume_require_plots:
+                    expected_paths.update(
+                        png=result_dir / (plan.scenario.file_name + ".png"),
+                        pdf=result_dir / (plan.scenario.file_name + ".pdf"),
+                    )
+                resume_started = time.perf_counter()
+                resumed = (
+                    self._resume_result(json_path, fingerprint, expected_paths)
+                    if resume_completed and keep_scenario_json
+                    else None
+                )
+                if resumed is not None:
+                    resumed["file_name"] = plan.scenario.file_name
+                    resumed["timings_s"]["resume_check"] = round(
+                        time.perf_counter() - resume_started, 6
+                    )
+                    if assignment is not None:
+                        resumed["dispatch_key"] = assignment.short_key
+                        resumed["dispatch_cache_status"] = (
+                            dispatch_state.get("cache_status")
+                            if dispatch_state
+                            else "missing"
+                        )
+                    results.append(resumed)
+                    reporter.emit(prefix + " RESUME HIT", "success", "cases")
+                    if result_callback is not None:
+                        result_callback(resumed, plan, number, total)
+                    with open(output_root / "run_status.json", "w", encoding="utf-8") as stream:
+                        json.dump(results, stream, indent=2, default=_json_default)
+                    continue
+
+                # The previous fingerprint is no longer reusable. Remove only
+                # this case's exact artifacts before starting so a failed rerun
+                # can never be mistaken for the older successful result.
+                for stale_path in (
+                    out_path,
+                    csv_path,
+                    result_dyr_path,
+                    initialised_sav_path,
+                    result_dir / (plan.scenario.file_name + ".png"),
+                    result_dir / (plan.scenario.file_name + ".pdf"),
+                    result_dir / (plan.scenario.file_name + "_FAILED.txt"),
+                ):
+                    stale_path.unlink(missing_ok=True)
+
+                result = {
+                    "file_name": plan.scenario.file_name,
+                    "status": "running",
+                    "resume_status": "miss" if resume_completed else "disabled",
+                    "result_fingerprint": fingerprint,
+                }
+                if keep_scenario_json:
+                    self._write_result_metadata(
+                        json_path,
+                        plan.scenario.values,
+                        fingerprint,
+                        "running",
+                    )
+                    result["json"] = str(json_path)
                 if assignment is not None:
                     result["dispatch_key"] = assignment.short_key
                     result["dispatch_cache_status"] = (
@@ -312,6 +561,11 @@ class StudyEngine:
                 previous_cwd = Path.cwd()
                 stop_after_case = False
                 started = time.perf_counter()
+                timings = {}
+
+                def record_timing(name, stage_started):
+                    timings[name] = round(time.perf_counter() - stage_started, 6)
+
                 try:
                     if assignment is not None and (
                         dispatch_state is None or dispatch_state.get("status") != "completed"
@@ -326,6 +580,7 @@ class StudyEngine:
                             )
                         )
 
+                    setup_started = time.perf_counter()
                     os.chdir(str(work_dir))
                     call_hook(self.hooks, "before_case", self.backend, plan.scenario, work_dir)
                     if assignment is not None:
@@ -349,18 +604,22 @@ class StudyEngine:
                             reporter.command(prefix, "MAKE GRID INFINITE")
                             self.backend.make_grid_infinite()
                         call_hook(self.hooks, "after_dispatch", self.backend, plan.scenario, work_dir)
+                    record_timing("case_setup", setup_started)
 
+                    result_staging_started = time.perf_counter()
                     if keep_result_dyr:
-                        shutil.copy2(str(dyr_path), str(result_dyr_path))
+                        _publish_by_link(dyr_path, result_dyr_path)
                         result["dyr"] = str(result_dyr_path)
                         reporter.emit(
                             prefix + " RESULT DYR " + str(result_dyr_path),
                             "load",
                             "commands",
                         )
+                    record_timing("result_staging", result_staging_started)
 
+                    dynamic_init_started = time.perf_counter()
                     reporter.emit(prefix + " DYNAMIC INIT " + str(dyr_path), "load", "commands")
-                    self.backend.initialize_dynamics(
+                    playback_metadata = self.backend.initialize_dynamics(
                         work_dir,
                         dyr_path,
                         out_path,
@@ -369,7 +628,27 @@ class StudyEngine:
                             initialised_staging_path if keep_initialised_sav else None
                         ),
                     )
+                    record_timing("dynamic_initialization", dynamic_init_started)
+                    if isinstance(playback_metadata, dict) and playback_metadata:
+                        result["playback"] = {
+                            key: value
+                            for key, value in playback_metadata.items()
+                            if key not in {"plb_path", "dyr_path"}
+                        }
+                        reporter.emit(
+                            prefix
+                            + " PLAYBACK {} points={} Vspan={:.6g} pu Fspan={:.6g} Hz".format(
+                                playback_metadata.get("stem", "profile"),
+                                playback_metadata.get("points", 0),
+                                float(playback_metadata.get("voltage_span_pu", 0.0)),
+                                float(playback_metadata.get("frequency_max_hz", 0.0))
+                                - float(playback_metadata.get("frequency_min_hz", 0.0)),
+                            ),
+                            "load",
+                            "commands",
+                        )
                     if keep_initialised_sav:
+                        initialised_publish_started = time.perf_counter()
                         if (
                             not initialised_staging_path.exists()
                             or initialised_staging_path.stat().st_size <= 0
@@ -379,14 +658,20 @@ class StudyEngine:
                                     initialised_staging_path
                                 )
                             )
-                        shutil.copy2(str(initialised_staging_path), str(initialised_sav_path))
+                        _publish_by_move(
+                            initialised_staging_path, initialised_sav_path
+                        )
                         result["initialised_sav"] = str(initialised_sav_path)
                         reporter.emit(
                             prefix + " RESULT INITIALISED SAV " + str(initialised_sav_path),
                             "load",
                             "commands",
                         )
+                        record_timing(
+                            "initialised_sav_publish", initialised_publish_started
+                        )
                     call_hook(self.hooks, "after_dynamic_initialization", self.backend, plan.scenario, work_dir)
+                    simulation_started = time.perf_counter()
                     current_time = 0.0
                     for event in plan.events:
                         if event.time < current_time:
@@ -414,16 +699,41 @@ class StudyEngine:
                             "commands",
                         )
                         self.backend.run_to(plan.scenario.end_time)
-                    reporter.emit(prefix + " CONVERT OUT -> CSV", "load", "commands")
-                    out_to_csv(
-                        str(out_path), str(csv_path), self.dyntools,
-                        self.config.section("dynamics").get("frequency_hz", 50.0),
+                    record_timing("simulation", simulation_started)
+                    decode_started = time.perf_counter()
+                    nominal_frequency = self.config.section("dynamics").get(
+                        "frequency_hz", 50.0
                     )
+                    if in_memory_postprocessing:
+                        reporter.emit(
+                            prefix + " DECODE OUT -> MEMORY", "load", "commands"
+                        )
+                        dataframe = out_to_dataframe(
+                            str(out_path), self.dyntools, nominal_frequency
+                        )
+                        result["_dataframe"] = dataframe
+                        if keep_csv_results or result_callback is None:
+                            csv_started = time.perf_counter()
+                            write_dataframe_csv(dataframe, str(csv_path))
+                            result["csv"] = str(csv_path)
+                            record_timing("csv_write", csv_started)
+                    else:
+                        reporter.emit(
+                            prefix + " CONVERT OUT -> CSV", "load", "commands"
+                        )
+                        out_to_csv(
+                            str(out_path),
+                            str(csv_path),
+                            self.dyntools,
+                            nominal_frequency,
+                        )
+                        result["csv"] = str(csv_path)
+                    record_timing("out_decode", decode_started)
                     result.update(
                         status="completed",
                         out=str(out_path),
-                        csv=str(csv_path),
                         elapsed_s=round(time.perf_counter() - started, 3),
+                        timings_s=timings,
                     )
                     if json_path.exists():
                         result["json"] = str(json_path)
@@ -433,6 +743,7 @@ class StudyEngine:
                         error=str(exc),
                         traceback=traceback.format_exc(),
                         elapsed_s=round(time.perf_counter() - started, 3),
+                        timings_s=timings,
                     )
                     failure_path = result_dir / (plan.scenario.file_name + "_FAILED.txt")
                     with open(failure_path, "w", encoding="utf-8") as stream:
@@ -447,7 +758,39 @@ class StudyEngine:
 
                 results.append(result)
                 if result_callback is not None:
+                    callback_started = time.perf_counter()
                     result_callback(result, plan, number, total)
+                    timings["result_callback"] = round(
+                        time.perf_counter() - callback_started, 6
+                    )
+                # DataFrames are an in-process hand-off only; never serialize
+                # thousands of channel samples into run_status.json.
+                result.pop("_dataframe", None)
+                timings["engine_total"] = round(time.perf_counter() - started, 6)
+                result["timings_s"] = timings
+                if keep_scenario_json:
+                    if result.get("status") != "completed":
+                        metadata_status = "failed"
+                    elif resume_require_plots and result.get("plot_status") not in {
+                        "completed",
+                        "reused",
+                    }:
+                        metadata_status = (
+                            "failed"
+                            if result.get("plot_status")
+                            in {"failed", "skipped_invalid_tov"}
+                            else "study_completed"
+                        )
+                    else:
+                        metadata_status = "completed"
+                    self._write_result_metadata(
+                        json_path,
+                        plan.scenario.values,
+                        fingerprint,
+                        metadata_status,
+                        plot_status=result.get("plot_status"),
+                        error=result.get("error") or result.get("plot_error"),
+                    )
                 with open(output_root / "run_status.json", "w", encoding="utf-8") as stream:
                     json.dump(results, stream, indent=2, default=_json_default)
                 if stop_after_case:

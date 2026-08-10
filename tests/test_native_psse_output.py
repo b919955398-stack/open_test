@@ -5,6 +5,7 @@ from pathlib import Path
 
 from psse_open.backend import PsseBackend
 from psse_open.config import ProjectConfig
+from psse_open.models import PlaybackPoint
 
 
 class _FakePsspy(object):
@@ -161,6 +162,42 @@ class NativePsseOutputTests(unittest.TestCase):
         self.assertLess(call_names.index("save"), call_names.index("strt"))
         save_calls = [call[1] for call in fake.calls if call[0] == "save"]
         self.assertEqual(save_calls, [("initialised_123_0001.sav",)])
+
+    def test_each_case_gets_a_distinct_short_playback_file_stem(self):
+        fake = _DynamicFakePsspy()
+        config = ProjectConfig("test.json", {
+            "system": {"infinite_bus": 99, "infinite_machine": {"id": "1"}},
+            "dynamics": {"frequency_hz": 50.0},
+            "channel_definition": {"bus_voltage_channels": []},
+        })
+        backend = PsseBackend(fake, config)
+        playback = [
+            PlaybackPoint(0.0, voltage_pu=1.0, frequency_hz=50.0),
+            PlaybackPoint(0.5, voltage_pu=1.2, frequency_hz=50.0),
+            PlaybackPoint(0.93, voltage_pu=1.0, frequency_hz=50.0),
+        ]
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory).resolve()
+            dyr_path = runtime / "base.dyr"
+            dyr_path.write_text("/\n", encoding="ascii")
+            try:
+                os.chdir(str(runtime))
+                first = backend.initialize_dynamics(
+                    runtime, dyr_path, runtime / "CSR" / "case.out", playback
+                )
+                second = backend.initialize_dynamics(
+                    runtime, dyr_path, runtime / "DMAT" / "case.out", playback
+                )
+            finally:
+                os.chdir(str(previous))
+
+            self.assertNotEqual(first["stem"], second["stem"])
+            self.assertEqual(len(first["stem"]), 8)
+            self.assertEqual(len(second["stem"]), 8)
+            self.assertIn("'{}'".format(first["stem"]), Path(first["dyr_path"]).read_text())
+            self.assertIn("'{}'".format(second["stem"]), Path(second["dyr_path"]).read_text())
+            self.assertGreater(first["voltage_span_pu"], 0.1)
 
 
 if __name__ == "__main__":

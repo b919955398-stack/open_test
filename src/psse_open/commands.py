@@ -17,6 +17,28 @@ def _number(value: Any, default=None):
     return float(value)
 
 
+def _first_number(scenario: Scenario, names, default=None):
+    for name in names:
+        value = scenario.get(name)
+        if value not in (None, ""):
+            return _number(value, default)
+    return default
+
+
+def _is_tov_scenario(scenario: Scenario) -> bool:
+    labels = "{} {} {}".format(
+        scenario.sheet,
+        scenario.get("Category", ""),
+        scenario.get("Test Type", ""),
+    ).upper()
+    return (
+        "TOV" in labels
+        or "TEMPORARY OVER" in labels
+        or scenario.get("U_Ov") not in (None, "")
+        or scenario.get("TOV_Timing_Signal_sig") not in (None, "")
+    )
+
+
 def _initial_profile_value(value: Any, default: float = 0.0) -> float:
     return initial_signal_value(value, default)
 
@@ -191,13 +213,32 @@ def build_plan(scenario: Scenario) -> StudyPlan:
 
     if scenario.get("PLB_Required") is True and not playback:
         warnings.append("PLB_Required is true but no parseable Vslack/Fslack profile was found")
-    if scenario.get("TOV_Shunt_C_uF_sig") not in (None, ""):
-        start = _number(scenario.get("Fault_Time"), 0.5)
-        duration = _number(scenario.get("Fault_Duration"), 0.43)
-        events.append(Event(start, len(events), "tov_shunt_apply", {
-            "bus": scenario.get("Faulted_Bus", "poc"), "capacitance_uf": float(scenario.get("TOV_Shunt_C_uF_sig"))
-        }))
-        events.append(Event(start + duration, len(events), "tov_shunt_clear", {"bus": scenario.get("Faulted_Bus", "poc")}))
+    tov_capacitance = scenario.get("TOV_Shunt_C_uF_sig")
+    tov_mvar = scenario.get("TOV_MVAr")
+    if tov_capacitance not in (None, "") or tov_mvar not in (None, ""):
+        start = _first_number(
+            scenario, ("Fault_Time", "Fault_Time_sig", "fstart"), 0.5
+        )
+        duration = _first_number(
+            scenario, ("Fault_Duration", "Fault_Duration_sig", "fdur"), 0.43
+        )
+        payload = {"bus": scenario.get("Faulted_Bus", "poc")}
+        if tov_capacitance not in (None, ""):
+            payload["capacitance_uf"] = float(tov_capacitance)
+        else:
+            payload["mvar"] = float(tov_mvar)
+        events.append(
+            Event(start, len(events), "tov_shunt_apply", payload, "structured TOV")
+        )
+        events.append(
+            Event(
+                start + duration,
+                len(events),
+                "tov_shunt_clear",
+                {"bus": scenario.get("Faulted_Bus", "poc")},
+                "structured TOV",
+            )
+        )
 
     callbacks = scenario.get("Active Callbacks")
     if callbacks not in (None, ""):
@@ -207,6 +248,24 @@ def build_plan(scenario: Scenario) -> StudyPlan:
                 events.append(Event(0.0, len(events), "callback", {"name": str(name).strip()}))
 
     events.sort()
+    if _is_tov_scenario(scenario):
+        voltage_values = [
+            float(point.voltage_pu)
+            for point in playback
+            if point.voltage_pu is not None
+        ]
+        playback_span = (
+            max(voltage_values) - min(voltage_values) if voltage_values else 0.0
+        )
+        has_tov_shunt = any(event.kind == "tov_shunt_apply" for event in events)
+        if playback_span <= 1.0e-9 and not has_tov_shunt:
+            raise ValueError(
+                "TOV scenario {} has no executable voltage disturbance. "
+                "Populate Vslack_pu_psse/Vslack_pu_sig with a non-flat profile, "
+                "or provide TOV_Shunt_C_uF_sig/TOV_MVAr.".format(
+                    scenario.file_name
+                )
+            )
     if events and events[-1].time > scenario.end_time:
         warnings.append("Last event at {:.3f}s exceeds end time {:.3f}s".format(events[-1].time, scenario.end_time))
     return StudyPlan(scenario, events, playback, warnings)
