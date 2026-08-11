@@ -499,16 +499,18 @@ def run_psse_studies(
                 or result.get("plot_status") in {"completed", "reused"}
             )
         )
+        result_metadata = {
+            "plot_status": result.get("plot_status"),
+            "error": result.get("error") or result.get("plot_error"),
+        }
+        if result.get("plb"):
+            result_metadata["plb_path"] = result["plb"]
         _NATIVE_STUDY_ENGINE_CLASS._write_result_metadata(
             Path(json_value),
             plan.scenario.values,
             fingerprint,
             "completed" if complete else "failed",
-            plot_status=result.get("plot_status"),
-            error=(
-                result.get("error")
-                or result.get("plot_error")
-            ),
+            **result_metadata,
         )
 
     status_path = Path(RESULTS_DIR) / "run_status.json"

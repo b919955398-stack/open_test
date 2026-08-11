@@ -125,6 +125,47 @@ def parse_psse_commands(text: str) -> List[Event]:
         }, "PSSE Commands"))
         order += 1
 
+    fixed_shunt_change = re.compile(
+        r"CHANGE\s+FIXED_SHUNT\s+['\"]([^'\"]+)['\"]\s+MVAR\s+TO\s+({n})\s+AT\s+({n})\s*s\b".format(
+            n=NUMBER
+        ),
+        re.IGNORECASE,
+    )
+    for match in fixed_shunt_change.finditer(source):
+        events.append(Event(float(match.group(3)), order, "fixed_shunt_change", {
+            "shunt": match.group(1), "mvar": float(match.group(2))
+        }, "PSSE Commands"))
+        order += 1
+
+    fixed_shunt_trip = re.compile(
+        r"TRIP\s+FIXED_SHUNT\s+['\"]([^'\"]+)['\"]\s+AT\s+({n})\s*s\b".format(
+            n=NUMBER
+        ),
+        re.IGNORECASE,
+    )
+
+    fixed_shunt_commands = [
+        command.strip()
+        for command in re.split(r";|[\r\n]+", source)
+        if re.search(r"\bFIXED_SHUNT\b", command, re.IGNORECASE)
+    ]
+    for command in fixed_shunt_commands:
+        if not (
+            fixed_shunt_change.fullmatch(command)
+            or fixed_shunt_trip.fullmatch(command)
+        ):
+            raise ValueError(
+                "Invalid FIXED_SHUNT command syntax in PSSE Commands: {!r}. "
+                "Expected CHANGE FIXED_SHUNT '<name>' MVAR TO <value> AT <time>s "
+                "or TRIP FIXED_SHUNT '<name>' AT <time>s.".format(command)
+            )
+
+    for match in fixed_shunt_trip.finditer(source):
+        events.append(Event(float(match.group(2)), order, "fixed_shunt_trip", {
+            "shunt": match.group(1)
+        }, "PSSE Commands"))
+        order += 1
+
     transformer = re.compile(
         r"CHANGE\s+TRANSFORMER\s+['\"]([^'\"]+)['\"]\s+PHASE\s+TO\s+({n})\s+AT\s+({n})s".format(n=NUMBER),
         re.IGNORECASE,

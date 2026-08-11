@@ -531,22 +531,75 @@ class PsseBackend:
             raise PsseError("Unsupported fault type code {}".format(code))
         self._check(result, "apply fault")
 
-    def _change_fixed_shunt(self, bus: int, shunt_id: str, status: int, b_mvar: float) -> None:
+    def resolve_fixed_shunt(self, alias: Any) -> Dict[str, Any]:
+        """Resolve a SPEC shunt name through the project/system definition."""
+        requested = str(alias)
+        fixed_shunts = self.system.get("fixed_shunts", {})
+        configured = fixed_shunts.get(requested)
+        if configured is None:
+            requested_lower = requested.lower()
+            configured = next(
+                (
+                    value
+                    for name, value in fixed_shunts.items()
+                    if str(name).lower() == requested_lower
+                ),
+                None,
+            )
+        if not configured:
+            raise PsseError(
+                "Unknown fixed-shunt alias {!r}; add it to system.fixed_shunts".format(
+                    alias
+                )
+            )
+        return configured
+
+    def _change_fixed_shunt(
+        self,
+        bus: int,
+        shunt_id: str,
+        status: int,
+        b_mvar: Optional[float] = None,
+    ) -> None:
         """Use the public PSS/E 34 fixed-shunt API, with an older-name fallback."""
+        real_values = (
+            [self._f, self._f]
+            if b_mvar is None
+            else [0.0, float(b_mvar)]
+        )
         modern = getattr(self.psspy, "fixed_shunt_chng_3", None)
         if modern is not None:
             # PSS/E 34 signature: IBUS, ID, INTGAR(1), REALAR(2), NAME.
-            result = modern(int(bus), str(shunt_id), [int(status)], [0.0, float(b_mvar)], self._s)
+            result = modern(
+                int(bus), str(shunt_id), [int(status)], real_values, self._s
+            )
             self._check(result, "change fixed shunt")
             return
         legacy = getattr(self.psspy, "shunt_chng", None)
         if legacy is not None:
             self._check(
-                legacy(int(bus), str(shunt_id), int(status), [0.0, float(b_mvar)]),
+                legacy(int(bus), str(shunt_id), int(status), real_values),
                 "change fixed shunt",
             )
             return
         raise PsseError("This PSS/E installation exposes neither fixed_shunt_chng_3 nor shunt_chng")
+
+    def apply_fixed_shunt_change(self, payload: Dict[str, Any]) -> None:
+        configured = self.resolve_fixed_shunt(payload["shunt"])
+        self._change_fixed_shunt(
+            int(configured["bus"]),
+            str(configured.get("id", "1")),
+            1,
+            float(payload["mvar"]),
+        )
+
+    def apply_fixed_shunt_trip(self, payload: Dict[str, Any]) -> None:
+        configured = self.resolve_fixed_shunt(payload["shunt"])
+        self._change_fixed_shunt(
+            int(configured["bus"]),
+            str(configured.get("id", "1")),
+            0,
+        )
 
     def apply_tov_shunt(self, payload: Dict[str, Any], enabled: bool) -> None:
         configured = self.system.get("fixed_shunts", {}).get("tov", {})
@@ -609,6 +662,10 @@ class PsseBackend:
                 keyword: float(payload["value"]),
             }
             self._check(self.psspy.load_chng_5(**arguments), "change load {}".format(payload["load"]))
+        elif event.kind == "fixed_shunt_change":
+            self.apply_fixed_shunt_change(payload)
+        elif event.kind == "fixed_shunt_trip":
+            self.apply_fixed_shunt_trip(payload)
         elif event.kind == "tov_shunt_apply":
             self.apply_tov_shunt(payload, True)
         elif event.kind == "tov_shunt_clear":

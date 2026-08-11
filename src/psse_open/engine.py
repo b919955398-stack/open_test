@@ -462,6 +462,7 @@ class StudyEngine:
                 csv_path = result_dir / (plan.scenario.file_name + ".csv")
                 json_path = result_dir / (plan.scenario.file_name + ".json")
                 result_dyr_path = result_dir / (plan.scenario.file_name + ".dyr")
+                result_plb_path = result_dir / (plan.scenario.file_name + ".plb")
                 initialised_sav_path = result_dir / (
                     plan.scenario.file_name + "_initialised.sav"
                 )
@@ -475,6 +476,12 @@ class StudyEngine:
                 expected_paths = {"json": json_path, "out": out_path}
                 if keep_result_dyr:
                     expected_paths["dyr"] = result_dyr_path
+                if plan.playback:
+                    expected_paths["plb"] = result_plb_path
+                else:
+                    # A case that no longer has a parsed playback profile must
+                    # not retain a trace file from an older fingerprint.
+                    result_plb_path.unlink(missing_ok=True)
                 if keep_initialised_sav:
                     expected_paths["initialised_sav"] = initialised_sav_path
                 if resume_require_plots:
@@ -515,6 +522,7 @@ class StudyEngine:
                     out_path,
                     csv_path,
                     result_dyr_path,
+                    result_plb_path,
                     initialised_sav_path,
                     result_dir / (plan.scenario.file_name + ".png"),
                     result_dir / (plan.scenario.file_name + ".pdf"),
@@ -629,12 +637,42 @@ class StudyEngine:
                         ),
                     )
                     record_timing("dynamic_initialization", dynamic_init_started)
-                    if isinstance(playback_metadata, dict) and playback_metadata:
+                    if plan.playback:
+                        if not isinstance(playback_metadata, dict):
+                            raise RuntimeError(
+                                "PSS/E did not return playback metadata for {}".format(
+                                    plan.scenario.file_name
+                                )
+                            )
+                        runtime_plb_value = playback_metadata.get("plb_path")
+                        runtime_plb_path = (
+                            Path(runtime_plb_value) if runtime_plb_value else None
+                        )
+                        if (
+                            runtime_plb_path is None
+                            or not runtime_plb_path.is_file()
+                            or runtime_plb_path.stat().st_size <= 0
+                        ):
+                            raise RuntimeError(
+                                "PSS/E did not create playback PLB for {}".format(
+                                    plan.scenario.file_name
+                                )
+                            )
+                        playback_publish_started = time.perf_counter()
+                        _publish_by_link(runtime_plb_path, result_plb_path)
+                        record_timing("playback_publish", playback_publish_started)
+                        result["plb"] = str(result_plb_path)
                         result["playback"] = {
                             key: value
                             for key, value in playback_metadata.items()
                             if key not in {"plb_path", "dyr_path"}
                         }
+                        result["playback"]["result_path"] = str(result_plb_path)
+                        reporter.emit(
+                            prefix + " RESULT PLB " + str(result_plb_path),
+                            "load",
+                            "commands",
+                        )
                         reporter.emit(
                             prefix
                             + " PLAYBACK {} points={} Vspan={:.6g} pu Fspan={:.6g} Hz".format(
@@ -782,13 +820,18 @@ class StudyEngine:
                         )
                     else:
                         metadata_status = "completed"
+                    result_metadata = {
+                        "plot_status": result.get("plot_status"),
+                        "error": result.get("error") or result.get("plot_error"),
+                    }
+                    if result.get("plb"):
+                        result_metadata["plb_path"] = result["plb"]
                     self._write_result_metadata(
                         json_path,
                         plan.scenario.values,
                         fingerprint,
                         metadata_status,
-                        plot_status=result.get("plot_status"),
-                        error=result.get("error") or result.get("plot_error"),
+                        **result_metadata,
                     )
                 with open(output_root / "run_status.json", "w", encoding="utf-8") as stream:
                     json.dump(results, stream, indent=2, default=_json_default)

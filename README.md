@@ -120,11 +120,12 @@ PSS/E 原生输出默认为 `console`，包括 FNSL mismatch/iteration、tap 与
 <Category>/<File_Name>_initialised.sav
 <Category>/<File_Name>.png
 <Category>/<File_Name>.pdf
+<Category>/<File_Name>.plb  # only when the scenario has a parsed playback profile
 ```
 
-每个 OUT 直接解码到内存，不再先写临时 CSV 又立即读回。上一个案例的绘图可与下一个 PSS/E 仿真重叠；画图失败或 TOV 验证失败时才保留诊断 CSV。Analysis、Replot、Appendix 仍共享 OUT、JSON 和同一目录结构。
+每个 OUT 直接解码到内存，不再先写临时 CSV 又立即读回。上一个案例的绘图可与下一个 PSS/E 仿真重叠；画图失败时保留诊断 CSV。存在 Vgrid/Fgrid playback 的案例还会自动保存 PSS/E 实际使用的 PLB，文件名与 `File_Name` 一致；没有 playback profile 的案例不会保留 PLB。Analysis、Replot、Appendix 仍共享 OUT、JSON 和同一目录结构。
 
-模型 SAV、DYR、DLL、TXT、CFG 只复制到一个共享临时运行目录一次，整个批次结束后清理，不再生成 `_work/<File_Name>`。已完整成功的六件结果会按模型与算例 fingerprint 安全续跑；任一输入改变或结果不完整都会重跑。这些技术选项全部位于 `run_psse_studies()`，master 保持公司原有的业务架构。
+模型 SAV、DYR、DLL、TXT、CFG 只复制到一个共享临时运行目录一次，整个批次结束后清理，不再生成 `_work/<File_Name>`。已完整成功的六个核心结果会按模型与算例 fingerprint 安全续跑；有 playback 的案例还要求同名 PLB 完整存在。任一输入、playback profile 改变或所需结果不完整都会重跑。这些技术选项全部位于 `run_psse_studies()`，master 保持公司原有的业务架构。
 
 ## 安装与运行
 
@@ -162,9 +163,11 @@ python -m pip install -e .
 
 PSS/E master 现在完全沿用公司版的结构：四组 sheet 列表传给 `load_specs_from_multiple_xlsx()`，在 `if RUN_STUDIES:` 内执行 Vslack 展开、`PSSE == True` 筛选及可选的 Test/Subtest/Batch 筛选。运行器技术开关不放在 master。
 
-每个成功案例会在 `RESULTS_DIR/<Category>/` 下形成同名 DYR、JSON、OUT、PNG、PDF 和 `_initialised.sav` 文件组。`_initialised.sav` 在 DYR、动态参数和 channels 装载完成后、`STRT` 前保存；它与内部 `_dispatch_cache` 的静态 dispatched SAV 分开。终端会显示 SPEC、Dispatch Key、时间推进、command、`STUDY OK/FAILED` 与 `PLOT OK/FAILED`；完整路径、cache 状态、分阶段耗时和错误写入 `run_status.json`。若缺少 chandef channel，错误会直接给出缺失 channel 名，而不是静默跳过。
+每个成功案例会在 `RESULTS_DIR/<Category>/` 下形成同名 DYR、JSON、OUT、PNG、PDF 和 `_initialised.sav` 文件组；有 parsed playback profile 时还会形成 `<File_Name>.plb`。`_initialised.sav` 在 DYR、动态参数和 channels 装载完成后、`STRT` 前保存；它与内部 `_dispatch_cache` 的静态 dispatched SAV 分开。终端会显示 SPEC、Dispatch Key、时间推进、command、`STUDY OK/FAILED` 与 `PLOT OK/FAILED`；完整路径、cache 状态、分阶段耗时和错误写入 `run_status.json`。若缺少 chandef channel，错误会直接给出缺失 channel 名，而不是静默跳过。
 
 运行器只报告执行和绘图错误，不自动判断波形在电气上是否正确。即使 TOV 曲线为平线，也会照常生成 PNG/PDF，由工程师人工审核结果。
+
+TOV 扰动完全由 SPEC 驱动：动态 `Vslack_pu_psse` profile 使用 PLBVFU1 playback；`PSSE Commands` 中的 `CHANGE FIXED_SHUNT '<name>' MVAR TO <value> AT <time>s` 与 `TRIP FIXED_SHUNT '<name>' AT <time>s` 使用 `.savdef` / `system.fixed_shunts` 中的同名 fixed shunt。两种方法同时存在时会全部执行；均不存在时不会施加 TOV 扰动。master 不包含 TOV 方法选择器。
 
 `MODEL_DIR` 应包含 SAV、DYR、`.savdef`、`.initdef`、`.chandef` 以及 OEM 模型所需 DLL/TXT/CFG。存在多份版本时，将 `open_psse_config.example.json` 复制为该目录下的 `open_psse_config.json` 并指定文件名。
 

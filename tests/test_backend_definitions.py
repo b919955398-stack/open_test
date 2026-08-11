@@ -3,7 +3,8 @@ import math
 import unittest
 from pathlib import Path
 
-from psse_open.backend import PsseBackend
+from psse_open.backend import PsseBackend, PsseError
+from psse_open.commands import parse_psse_commands
 from psse_open.config import ProjectConfig
 from psse_open.models import Scenario
 
@@ -116,6 +117,28 @@ class BackendDefinitionTests(unittest.TestCase):
         expected = 2.0 * math.pi * 50.0 * 100.0e-6 * 275.0 * 275.0
         self.assertEqual(call[0:3], (888888, "1", [1]))
         self.assertAlmostEqual(call[3][1], expected)
+
+    def test_fixed_shunt_command_events_use_named_project_configuration(self):
+        events = parse_psse_commands(
+            "CHANGE FIXED_SHUNT 'TOV' MVAR TO 1109.70957536556 AT 0.5s; "
+            "TRIP FIXED_SHUNT 'TOV' AT 0.93s"
+        )
+        scenario = Scenario("5255_TOV", 2, "shunt_tov", True, {})
+        for event in events:
+            self.backend.apply_event(event, scenario)
+
+        calls = [args for name, args in self.fake.calls if name == "fixed_shunt"]
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][0:3], (888888, "1", [1]))
+        self.assertAlmostEqual(calls[0][3][1], 1109.70957536556)
+        self.assertEqual(calls[1][0:3], (888888, "1", [0]))
+        self.assertEqual(calls[1][3], [self.fake.getdefaultreal()] * 2)
+
+    def test_unknown_fixed_shunt_alias_is_rejected(self):
+        with self.assertRaisesRegex(PsseError, "system.fixed_shunts"):
+            self.backend.apply_fixed_shunt_change(
+                {"shunt": "missing", "mvar": 100.0}
+            )
 
     def test_dispatch_uses_initdef_weights_and_pins_reactive_target(self):
         generators = [
