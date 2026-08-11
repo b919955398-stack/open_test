@@ -554,6 +554,74 @@ class PsseBackend:
             )
         return configured
 
+    def _automation_tov_fixed_shunt(self) -> Dict[str, Any]:
+        """Return the reserved automation TOV definition with a clear error."""
+        try:
+            return self.resolve_fixed_shunt("tov")
+        except PsseError:
+            raise PsseError(
+                "Configured automation TOV shunt alias 'tov' is not defined."
+            )
+
+    def ensure_tov_fixed_shunt(self) -> bool:
+        """Ensure the reserved TOV placeholder exists in the loaded case.
+
+        The caller invokes this only on the per-scenario working case, after
+        loading the base/dispatched SAV and before dynamic conversion.  A
+        configured shunt that already exists is left completely untouched.
+        """
+        configured = self._automation_tov_fixed_shunt()
+        alias = "tov"
+        bus = int(configured["bus"])
+        shunt_id = str(configured.get("id", "1"))
+
+        query = getattr(self.psspy, "fxsint", None)
+        if query is None:
+            raise PsseError(
+                "Cannot check automation TOV shunt alias {!r} at bus {} ID {!r}: "
+                "PSS/E API FXSINT is unavailable".format(alias, bus, shunt_id)
+            )
+        result = query(bus, shunt_id, "STATUS")
+        ierr = result[0] if isinstance(result, tuple) else result
+        if ierr == 0:
+            return False
+        # FXSINT error 2 means that the fixed shunt bus/ID was not found.  Do
+        # not interpret bus errors or invalid query arguments as absence.
+        if ierr != 2:
+            raise PsseError(
+                "Failed to check automation TOV shunt alias {!r} at bus {} ID {!r}; "
+                "PSS/E error {}".format(alias, bus, shunt_id, ierr)
+            )
+
+        real_values = [0.0, 0.0]
+        modern = getattr(self.psspy, "fixed_shunt_data_3", None)
+        if modern is not None:
+            create_result = modern(
+                bus, shunt_id, [0], real_values, self._s
+            )
+        else:
+            legacy = getattr(self.psspy, "shunt_data", None)
+            if legacy is None:
+                raise PsseError(
+                    "Cannot create automation TOV shunt alias {!r} at bus {} ID {!r}: "
+                    "PSS/E exposes neither FIXED_SHUNT_DATA_3 nor SHUNT_DATA".format(
+                        alias, bus, shunt_id
+                    )
+                )
+            create_result = legacy(bus, shunt_id, 0, real_values)
+
+        create_ierr = (
+            create_result[0]
+            if isinstance(create_result, tuple)
+            else create_result
+        )
+        if isinstance(create_ierr, int) and create_ierr != 0:
+            raise PsseError(
+                "Failed to create automation TOV shunt alias {!r} at bus {} ID {!r}; "
+                "PSS/E error {}".format(alias, bus, shunt_id, create_ierr)
+            )
+        return True
+
     def _change_fixed_shunt(
         self,
         bus: int,
@@ -602,8 +670,8 @@ class PsseBackend:
         )
 
     def apply_tov_shunt(self, payload: Dict[str, Any], enabled: bool) -> None:
-        configured = self.system.get("fixed_shunts", {}).get("tov", {})
-        bus = int(configured.get("bus", self.resolve_bus(payload.get("bus", "fault"))))
+        configured = self._automation_tov_fixed_shunt()
+        bus = int(configured["bus"])
         shunt_id = str(configured.get("id", "1"))
         b_mvar = 0.0
         if enabled:

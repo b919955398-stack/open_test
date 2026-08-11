@@ -91,6 +91,17 @@ def write_plan(plans: Iterable[StudyPlan], output: str) -> Path:
     return target
 
 
+def _uses_automation_tov_fixed_shunt(plan: StudyPlan) -> bool:
+    """Return whether this scenario needs the reserved ``tov`` placeholder."""
+    for event in plan.events:
+        if event.kind in {"tov_shunt_apply", "tov_shunt_clear"}:
+            return True
+        if event.kind in {"fixed_shunt_change", "fixed_shunt_trip"}:
+            if str(event.parameters.get("shunt", "")).strip().lower() == "tov":
+                return True
+    return False
+
+
 class StudyEngine:
     def __init__(self, config):
         self.config = config
@@ -612,6 +623,9 @@ class StudyEngine:
                             reporter.command(prefix, "MAKE GRID INFINITE")
                             self.backend.make_grid_infinite()
                         call_hook(self.hooks, "after_dispatch", self.backend, plan.scenario, work_dir)
+                    if _uses_automation_tov_fixed_shunt(plan):
+                        reporter.command(prefix, "ENSURE TOV FIXED SHUNT")
+                        self.backend.ensure_tov_fixed_shunt()
                     record_timing("case_setup", setup_started)
 
                     result_staging_started = time.perf_counter()

@@ -100,6 +100,23 @@ class _PlaybackBackend(_Backend):
         }
 
 
+class _TovOrderBackend(_Backend):
+    def ensure_tov_fixed_shunt(self):
+        self.order.append("ensure_tov_fixed_shunt")
+
+    def initialize_dynamics(
+        self, work_dir, dyr_path, out_path, playback, initialised_sav_path=None
+    ):
+        self.order.append("initialize_dynamics")
+        return super().initialize_dynamics(
+            work_dir,
+            dyr_path,
+            out_path,
+            playback,
+            initialised_sav_path=initialised_sav_path,
+        )
+
+
 class EngineRuntimeTests(unittest.TestCase):
     @staticmethod
     def _make_engine(root, backend):
@@ -229,6 +246,69 @@ class EngineRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(
                 [item["plot_status"] for item in resumed], ["reused", "reused"]
+            )
+
+    def test_tov_placeholder_is_ensured_before_dynamic_initialization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            order = []
+            backend = _TovOrderBackend(order)
+            engine, _output = self._make_engine(root, backend)
+            engine.config.data["system"]["fixed_shunts"] = {
+                "tov": {"bus": 331184, "id": "1"}
+            }
+            scenario = Scenario("5255_TOV", 2, "fixed_shunt_tov", True, {
+                "File_Name": "fixed_shunt_tov",
+                "Category": "5255_TOV",
+                "Post_Init_Duration_s": 1.0,
+                "PSSE Commands": (
+                    "CHANGE FIXED_SHUNT 'tov' MVAR TO 1109.709 AT 0.5s; "
+                    "TRIP FIXED_SHUNT 'tov' AT 0.93s"
+                ),
+            })
+
+            with patch(
+                "psse_open.engine.out_to_csv", side_effect=self._fake_out_to_csv
+            ):
+                result = engine.run([build_plan(scenario)])[0]
+
+            self.assertEqual(result["status"], "completed")
+            self.assertLess(
+                order.index("start:fixed_shunt_tov"),
+                order.index("ensure_tov_fixed_shunt"),
+            )
+            self.assertLess(
+                order.index("ensure_tov_fixed_shunt"),
+                order.index("initialize_dynamics"),
+            )
+
+    def test_structured_tov_uses_the_same_pre_init_placeholder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            order = []
+            backend = _TovOrderBackend(order)
+            engine, _output = self._make_engine(root, backend)
+            engine.config.data["system"]["fixed_shunts"] = {
+                "tov": {"bus": 331184, "id": "1"}
+            }
+            scenario = Scenario("5255_TOV", 2, "structured_tov", True, {
+                "File_Name": "structured_tov",
+                "Category": "5255_TOV",
+                "Post_Init_Duration_s": 1.0,
+                "TOV_MVAr": 1109.709,
+                "Fault_Time": 0.5,
+                "Fault_Duration": 0.43,
+            })
+
+            with patch(
+                "psse_open.engine.out_to_csv", side_effect=self._fake_out_to_csv
+            ):
+                result = engine.run([build_plan(scenario)])[0]
+
+            self.assertEqual(result["status"], "completed")
+            self.assertLess(
+                order.index("ensure_tov_fixed_shunt"),
+                order.index("initialize_dynamics"),
             )
 
     def test_vgrid_fgrid_playback_is_retained_with_scenario_name_and_metadata(self):

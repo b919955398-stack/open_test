@@ -74,6 +74,7 @@ class _Backend:
     def __init__(self):
         self.initializations = []
         self.dispatch_calls = 0
+        self.ensure_tov_calls = []
         self.save_calls = 0
         self.save_paths = []
 
@@ -91,6 +92,9 @@ class _Backend:
 
     def make_grid_infinite(self):
         pass
+
+    def ensure_tov_fixed_shunt(self):
+        self.ensure_tov_calls.append(self.initializations[-1])
 
     def save_case(self, sav_path):
         self.save_calls += 1
@@ -215,6 +219,47 @@ class DispatchCacheTests(unittest.TestCase):
             self.assertEqual(len(second.backend.initializations), 2)
             self.assertTrue(all(not solved for _name, solved in second.backend.initializations))
             self.assertEqual({item["dispatch_cache_status"] for item in second_results}, {"hit"})
+
+    def test_tov_placeholder_is_per_case_and_does_not_rewrite_dispatch_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = _config(root, root / "cache")
+            config.data["system"]["fixed_shunts"] = {
+                "tov": {"bus": 331184, "id": "1"}
+            }
+            plans = [_plan("tov_1"), _plan("tov_2", event_time=5.5)]
+            for plan in plans:
+                plan.events = [
+                    Event(
+                        0.5,
+                        0,
+                        "fixed_shunt_change",
+                        {"shunt": "tov", "mvar": 1109.709},
+                    ),
+                    Event(0.93, 1, "fixed_shunt_trip", {"shunt": "tov"}),
+                ]
+
+            def fake_out_to_csv(out_path, csv_path, dyntools, nominal_frequency_hz):
+                Path(csv_path).write_text("time,P\n0,0\n", encoding="utf-8")
+
+            engine = StudyEngine.__new__(StudyEngine)
+            engine.config = config
+            engine.psspy = object()
+            engine.dyntools = object()
+            engine.hooks = None
+            engine.backend = _Backend()
+            engine.reporter = ConsoleReporter(level="quiet", print_case_spec=False)
+            with patch("psse_open.engine.out_to_csv", side_effect=fake_out_to_csv):
+                results = engine.run(plans)
+
+            cache_path = Path(results[0]["dispatched_sav"])
+            self.assertEqual(cache_path, Path(results[1]["dispatched_sav"]))
+            self.assertEqual(cache_path.read_bytes(), b"solved dispatched sav")
+            self.assertEqual(engine.backend.save_calls, 1)
+            self.assertEqual(engine.backend.ensure_tov_calls, [
+                (cache_path.name, False),
+                (cache_path.name, False),
+            ])
 
 
 if __name__ == "__main__":

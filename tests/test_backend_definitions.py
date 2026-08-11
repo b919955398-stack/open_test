@@ -78,6 +78,60 @@ class FakePsspy(object):
         return self._record("machine_data_2", bus, machine_id, _integers, reals)
 
 
+class FixedShuntFakePsspy(FakePsspy):
+    def __init__(self, fixed_shunts=None):
+        super().__init__()
+        self.fixed_shunts = dict(fixed_shunts or {})
+
+    def fxsint(self, bus, shunt_id, field):
+        self.calls.append(("fxsint", (bus, shunt_id, field)))
+        key = (int(bus), str(shunt_id))
+        if key not in self.fixed_shunts:
+            return 2, None
+        return 0, self.fixed_shunts[key]["status"]
+
+    def fixed_shunt_data_3(self, bus, shunt_id, integers, reals, name):
+        self.calls.append(
+            ("fixed_shunt_data_3", (bus, shunt_id, integers, reals, name))
+        )
+        key = (int(bus), str(shunt_id))
+        if key in self.fixed_shunts:
+            return 4
+        self.fixed_shunts[key] = {
+            "status": int(integers[0]),
+            "g": float(reals[0]),
+            "b": float(reals[1]),
+        }
+        return 0
+
+    def fixed_shunt_chng_3(self, bus, shunt_id, integers, reals, name):
+        self.calls.append(
+            ("fixed_shunt", (bus, shunt_id, integers, reals, name))
+        )
+        key = (int(bus), str(shunt_id))
+        if key not in self.fixed_shunts:
+            return 5
+        shunt = self.fixed_shunts[key]
+        shunt["status"] = int(integers[0])
+        if reals != [self.getdefaultreal()] * 2:
+            shunt["g"] = float(reals[0])
+            shunt["b"] = float(reals[1])
+        return 0
+
+
+class LegacyFixedShuntFakePsspy(FixedShuntFakePsspy):
+    fixed_shunt_data_3 = None
+
+    def shunt_data(self, bus, shunt_id, status, reals):
+        self.calls.append(("shunt_data", (bus, shunt_id, status, reals)))
+        self.fixed_shunts[(int(bus), str(shunt_id))] = {
+            "status": int(status),
+            "g": float(reals[0]),
+            "b": float(reals[1]),
+        }
+        return 0
+
+
 class BackendDefinitionTests(unittest.TestCase):
     def setUp(self):
         root = Path(__file__).resolve().parents[1]
@@ -139,6 +193,124 @@ class BackendDefinitionTests(unittest.TestCase):
             self.backend.apply_fixed_shunt_change(
                 {"shunt": "missing", "mvar": 100.0}
             )
+
+    def _fixed_shunt_backend(self, physical_shunts=None, aliases=None):
+        root = Path(__file__).resolve().parents[1]
+        data = {
+            "system": {
+                "fixed_shunts": aliases
+                if aliases is not None
+                else {"tov": {"bus": 888888, "id": "1"}},
+            },
+            "dynamics": {"frequency_hz": 50.0},
+        }
+        fake = FixedShuntFakePsspy(physical_shunts)
+        backend = PsseBackend(fake, ProjectConfig(str(root / "test.json"), data))
+        return backend, fake
+
+    def test_missing_tov_shunt_is_created_off_with_zero_admittance(self):
+        backend, fake = self._fixed_shunt_backend()
+
+        self.assertTrue(backend.ensure_tov_fixed_shunt())
+
+        self.assertEqual(
+            fake.fixed_shunts[(888888, "1")],
+            {"status": 0, "g": 0.0, "b": 0.0},
+        )
+        create_calls = [
+            args for name, args in fake.calls if name == "fixed_shunt_data_3"
+        ]
+        self.assertEqual(create_calls, [(888888, "1", [0], [0.0, 0.0], "")])
+
+    def test_existing_tov_shunt_is_reused_without_overwrite(self):
+        original = {"status": 1, "g": 2.0, "b": 3.0}
+        backend, fake = self._fixed_shunt_backend(
+            {(888888, "1"): dict(original)}
+        )
+
+        self.assertFalse(backend.ensure_tov_fixed_shunt())
+
+        self.assertEqual(fake.fixed_shunts[(888888, "1")], original)
+        self.assertFalse(
+            any(name == "fixed_shunt_data_3" for name, _args in fake.calls)
+        )
+
+    def test_psse34_shunt_data_fallback_creates_zero_off_placeholder(self):
+        root = Path(__file__).resolve().parents[1]
+        fake = LegacyFixedShuntFakePsspy()
+        config = ProjectConfig(str(root / "test.json"), {
+            "system": {"fixed_shunts": {"tov": {"bus": 888888, "id": "1"}}},
+            "dynamics": {},
+        })
+        backend = PsseBackend(fake, config)
+
+        self.assertTrue(backend.ensure_tov_fixed_shunt())
+
+        calls = [args for name, args in fake.calls if name == "shunt_data"]
+        self.assertEqual(calls, [(888888, "1", 0, [0.0, 0.0])])
+
+    def test_tov_creation_failure_identifies_alias_bus_id_and_error(self):
+        backend, fake = self._fixed_shunt_backend()
+
+        def fail_create(*args):
+            return 7
+
+        fake.fixed_shunt_data_3 = fail_create
+        with self.assertRaisesRegex(
+            PsseError,
+            r"alias 'tov' at bus 888888 ID '1'; PSS/E error 7",
+        ):
+            backend.ensure_tov_fixed_shunt()
+
+    def test_change_and_trip_use_the_ensured_tov_placeholder(self):
+        backend, fake = self._fixed_shunt_backend()
+        backend.ensure_tov_fixed_shunt()
+
+        backend.apply_fixed_shunt_change({"shunt": "tov", "mvar": 1109.709})
+        self.assertEqual(
+            fake.fixed_shunts[(888888, "1")],
+            {"status": 1, "g": 0.0, "b": 1109.709},
+        )
+
+        backend.apply_fixed_shunt_trip({"shunt": "tov"})
+        self.assertEqual(fake.fixed_shunts[(888888, "1")]["status"], 0)
+        self.assertEqual(fake.fixed_shunts[(888888, "1")]["b"], 1109.709)
+
+    def test_missing_tov_alias_has_clear_error(self):
+        backend, _fake = self._fixed_shunt_backend(aliases={})
+        with self.assertRaisesRegex(
+            PsseError,
+            "Configured automation TOV shunt alias 'tov' is not defined",
+        ):
+            backend.ensure_tov_fixed_shunt()
+
+    def test_existing_arbitrary_fixed_shunt_keeps_normal_change_behaviour(self):
+        aliases = {"network_cap": {"bus": 777777, "id": "A"}}
+        physical = {(777777, "A"): {"status": 0, "g": 0.0, "b": 25.0}}
+        backend, fake = self._fixed_shunt_backend(physical, aliases)
+
+        backend.apply_fixed_shunt_change(
+            {"shunt": "network_cap", "mvar": 50.0}
+        )
+
+        self.assertEqual(
+            fake.fixed_shunts[(777777, "A")],
+            {"status": 1, "g": 0.0, "b": 50.0},
+        )
+
+    def test_missing_arbitrary_fixed_shunt_is_not_auto_created(self):
+        aliases = {"network_cap": {"bus": 777777, "id": "A"}}
+        backend, fake = self._fixed_shunt_backend({}, aliases)
+
+        with self.assertRaisesRegex(PsseError, "PSS/E error 5"):
+            backend.apply_fixed_shunt_change(
+                {"shunt": "network_cap", "mvar": 50.0}
+            )
+
+        self.assertEqual(fake.fixed_shunts, {})
+        self.assertFalse(
+            any(name == "fixed_shunt_data_3" for name, _args in fake.calls)
+        )
 
     def test_dispatch_uses_initdef_weights_and_pins_reactive_target(self):
         generators = [
