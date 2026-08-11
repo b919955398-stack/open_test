@@ -35,6 +35,76 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(events[0].parameters["residual_voltage_pu"], 0.75)
         self.assertEqual(events[-1].parameters["value"], -85.5)
 
+    def test_parse_exact_fixed_shunt_change_and_trip_syntax(self):
+        events = parse_psse_commands(
+            "CHANGE FIXED_SHUNT 'tov' MVAR TO 1109.70957536556 AT 0.5s; "
+            "TRIP FIXED_SHUNT 'tov' AT 0.93s"
+        )
+        self.assertEqual(
+            [event.kind for event in events],
+            ["fixed_shunt_change", "fixed_shunt_trip"],
+        )
+        self.assertAlmostEqual(events[0].time, 0.5)
+        self.assertEqual(events[0].parameters["shunt"], "tov")
+        self.assertAlmostEqual(events[0].parameters["mvar"], 1109.70957536556)
+        self.assertAlmostEqual(events[1].time, 0.93)
+        self.assertEqual(events[1].parameters, {"shunt": "tov"})
+
+    def test_malformed_fixed_shunt_command_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Invalid FIXED_SHUNT command syntax.*Expected CHANGE FIXED_SHUNT",
+        ):
+            parse_psse_commands(
+                "CHANGE FIXED_SHUNT 'tov' MVAR 1109.709 AT 0.5s"
+            )
+
+    def test_malformed_fixed_shunt_is_not_hidden_by_valid_command(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Invalid FIXED_SHUNT command syntax.*MVAR 1109\.709 AT 0\.5s",
+        ):
+            parse_psse_commands(
+                "TRIP FIXED_SHUNT 'tov' AT 0.93s; "
+                "CHANGE FIXED_SHUNT 'tov' MVAR 1109.709 AT 0.5s"
+            )
+
+    def test_tov_methods_are_driven_independently_by_spec(self):
+        vslack = (
+            "1, AT 0.5s ↑ 1.13207547169811, AT 0.93s ↓ 1, "
+            "WITH SCALING = 1.057106"
+        )
+        commands = (
+            "CHANGE FIXED_SHUNT 'tov' MVAR TO 1109.70957536556 AT 0.5s; "
+            "TRIP FIXED_SHUNT 'tov' AT 0.93s"
+        )
+        cases = {
+            "vslack_only": (
+                {"Vslack_pu_psse": vslack},
+                True,
+                [],
+            ),
+            "fixed_shunt_only": (
+                {"PSSE Commands": commands},
+                False,
+                ["fixed_shunt_change", "fixed_shunt_trip"],
+            ),
+            "both": (
+                {"Vslack_pu_psse": vslack, "PSSE Commands": commands},
+                True,
+                ["fixed_shunt_change", "fixed_shunt_trip"],
+            ),
+            "neither": ({}, False, []),
+        }
+        for name, (values, has_playback, event_kinds) in cases.items():
+            with self.subTest(name=name):
+                values = dict(values, Post_Init_Duration_s=2.0)
+                plan = build_plan(Scenario("5255_TOV", 2, name, True, values))
+                self.assertEqual(bool(plan.playback), has_playback)
+                self.assertEqual(
+                    [event.kind for event in plan.events], event_kinds
+                )
+
     def test_build_plan_resolves_vslack_placeholder(self):
         scenario = Scenario("sheet", 2, "case", True, {
             "Vslack_pu_psse": "1, AT 1s ↑ 1.05, WITH SCALING=$VSLACK",

@@ -79,6 +79,36 @@ class _FlatTovEngine:
         return [result]
 
 
+class _PlaybackMetadataEngine:
+    def __init__(self, config):
+        self.output_dir = Path(config.data["output_dir"])
+
+    def run(self, plans, result_callback=None):
+        plan = list(plans)[0]
+        name = plan.scenario.file_name
+        result_dir = self.output_dir / plan.scenario.category
+        result_dir.mkdir(parents=True, exist_ok=True)
+        out_path = result_dir / (name + ".out")
+        csv_path = result_dir / (name + ".csv")
+        json_path = result_dir / (name + ".json")
+        plb_path = result_dir / (name + ".plb")
+        out_path.write_bytes(b"out")
+        pd.DataFrame({"time": [0.0], "P": [1.0]}).to_csv(csv_path, index=False)
+        json_path.write_text("{}", encoding="utf-8")
+        plb_path.write_text("0 1 50\n99999 1 50\n", encoding="ascii")
+        result = {
+            "file_name": name,
+            "status": "completed",
+            "out": str(out_path),
+            "csv": str(csv_path),
+            "json": str(json_path),
+            "plb": str(plb_path),
+            "result_fingerprint": "playback-fingerprint",
+        }
+        result_callback(result, plan, 1, 1)
+        return [result]
+
+
 class StudyRunnerOutputTests(unittest.TestCase):
     def test_each_case_is_eventually_plotted_and_temporary_csv_is_removed(self):
         spec = pd.DataFrame([
@@ -144,6 +174,47 @@ class StudyRunnerOutputTests(unittest.TestCase):
             status = json.loads((Path(results_dir) / "run_status.json").read_text())
             self.assertEqual(status[0]["plot_status"], "completed")
             self.assertNotIn("validation_status", status[0])
+
+    def test_final_runner_metadata_retains_playback_path(self):
+        spec = pd.DataFrame([{
+            "File_Name": "playback_case",
+            "Category": "5255_Vgrid_Fgrid",
+            "PSSE": True,
+            "Grid_SCR": 3.0,
+            "Grid_X2R_sig": 5.0,
+            "Grid_FL_MVA_sig": 900.0,
+            "Post_Init_Duration_s": 1.0,
+        }])
+        with tempfile.TemporaryDirectory() as results_dir, \
+                patch("hbess_open.studyrunners.psse_study_runner._load_config", return_value=_Config()), \
+                patch("hbess_open.studyrunners.psse_study_runner.StudyEngine", _PlaybackMetadataEngine), \
+                patch(
+                    "hbess_open.studyrunners.psse_study_runner.build_plan",
+                    side_effect=lambda scenario: SimpleNamespace(
+                        scenario=scenario,
+                        events=[],
+                        playback=[SimpleNamespace(time=0.0)],
+                    ),
+                ):
+            results = run_psse_studies(
+                spec,
+                _FilePlotter(),
+                "model",
+                results_dir,
+                plot_in_background=False,
+                verbose=False,
+            )
+
+            retained = (
+                Path(results_dir)
+                / "5255_Vgrid_Fgrid"
+                / "playback_case.plb"
+            )
+            metadata = json.loads(
+                retained.with_suffix(".json").read_text(encoding="utf-8")
+            )["_native_run"]
+            self.assertEqual(metadata["plb_path"], str(retained))
+            self.assertEqual(results[0]["plb"], str(retained))
 
 
 if __name__ == "__main__":

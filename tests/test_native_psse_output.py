@@ -199,6 +199,41 @@ class NativePsseOutputTests(unittest.TestCase):
             self.assertIn("'{}'".format(second["stem"]), Path(second["dyr_path"]).read_text())
             self.assertGreater(first["voltage_span_pu"], 0.1)
 
+    def test_write_playback_serializes_each_profile_into_its_own_plb(self):
+        fake = _DynamicFakePsspy()
+        config = ProjectConfig("test.json", {
+            "system": {"infinite_bus": 99, "infinite_machine": {"id": "1"}},
+            "dynamics": {"frequency_hz": 50.0},
+        })
+        backend = PsseBackend(fake, config)
+        first_profile = [
+            PlaybackPoint(0.0, voltage_pu=1.0, frequency_hz=50.0),
+            PlaybackPoint(1.0, voltage_pu=1.1, frequency_hz=50.5),
+        ]
+        second_profile = [
+            PlaybackPoint(0.0, voltage_pu=1.0, frequency_hz=50.0),
+            PlaybackPoint(1.0, voltage_pu=0.9, frequency_hz=49.5),
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            first_path, _, _ = backend._write_playback(
+                runtime, first_profile, file_stem="first"
+            )
+            second_path, _, _ = backend._write_playback(
+                runtime, second_profile, file_stem="second"
+            )
+
+            self.assertEqual(
+                first_path.read_text(encoding="ascii"),
+                "0 1 50\n1 1.1 50.5\n99999 1.1 50.5\n",
+            )
+            self.assertEqual(
+                second_path.read_text(encoding="ascii"),
+                "0 1 50\n1 0.9 49.5\n99999 0.9 49.5\n",
+            )
+            self.assertNotEqual(first_path.read_bytes(), second_path.read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()
